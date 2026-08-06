@@ -1,0 +1,6 @@
+# MacOS Folder Attributes
+.DS_Store
+
+# Binary & Build Artifacts
+bin/
+obj/
