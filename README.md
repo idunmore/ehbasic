@@ -17,7 +17,7 @@ And ..
 
 - **None** of those I can find implement any kind of interrupt-driven serial input, with buffering and flow-control, and rely on software delays and terminal pacing for handling keyboard input.
 
-    This makes loading large programs via the common copy/paste technique glacially slow, and makes it reliant on terminal pacing controls which is has to be slower as the program gets larger.
+    This makes loading large programs via the common copy/paste technique glacially slow, and sometimes unreliable (pacing needs change with the length of the program).
 
 So ... if have a "standard" version that I can build from source I can a) extend it and b) add proper flow-control and input buffering.
 
