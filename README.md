@@ -1,8 +1,13 @@
 # EhBASIC for the Ben Eater 6502
 
+[![Static Badge](https://img.shields.io/badge/EhBASIC-v2.22p5.7-orange)](https://github.com/Klaus2m5/6502_EhBASIC_V2.22)&nbsp;
+[![Static Badge](https://img.shields.io/badge/architecture-Ben_Eater_6502-green)](https://eater.net/6502)&nbsp;
+[![Static Badge](https://img.shields.io/badge/assembler-ca65-red)](https://cc65.github.io/doc/ca65.html)&nbsp;
+[![Static Badge](https://img.shields.io/badge/CPU-65C02-blue)](https://westerndesigncenter.com/wdc/documentation/w65c02s.pdf)
+
 The goal here is simple:
 
-A full version of EhBASIC that can be built from source, generate a proper ROM image, and then "burned" and run 100% as-is on a 100% stock Ben Eater 6502 (herein "BE6502") build.
+A full version of [EhBASIC](http://retro.hansotten.nl/6502-sbc/lee-davison-web-site/enhanced-6502-basic/) that can be built from source, generate a proper ROM image, and then "burned" and run 100% as-is on a 100% stock Ben Eater 6502 (herein "BE6502") build.
 
 ### Motivation: The "Why?"
 I've found several **binary** builds  (ROM images) of EhBASIC that will run, as-is, on a stock build of Ben Eater's 6502 breadboard computer.
