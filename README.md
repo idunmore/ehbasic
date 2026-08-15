@@ -7,14 +7,14 @@
 
 The goal here is simple:
 
-A full version of [EhBASIC](http://retro.hansotten.nl/6502-sbc/lee-davison-web-site/enhanced-6502-basic/) that can be built from source, generate a proper ROM image, and then "burned" and run 100% as-is on a 100% stock Ben Eater 6502 (herein "BE6502") build.
+A full version of [EhBASIC](http://retro.hansotten.nl/6502-sbc/lee-davison-web-site/enhanced-6502-basic/) that can be built from source, generate a proper ROM image, and then "burned" to EEPROM and run 100% as-is on a 100% stock Ben Eater 6502 (herein "BE6502") build.
 
 ### Motivation: The "Why?"
-I've found several **binary** builds  (ROM images) of EhBASIC that will run, as-is, on a stock build of Ben Eater's 6502 breadboard computer.
+I've found several **binary** builds (ROM images) of EhBASIC that will run, as-is, on a stock build of Ben Eater's 6502 breadboard computer.
 
 However ...
 
- - **None** of those that I can find exist in a state where they *also* include the required source, configuration and make/build files necessary to build the project from source.
+ - **None** of those that I can find exist in a state where they *also* include the required source, configuration and make/build files necessary to build the project from source.  A couple of them have `make` files and source, but that source *doesn't* build to a BE6502-compatible binary/ROM image.
 
     This makes it very difficult, if not impossible, to extend or modify the code to support new hardware or keywords.
 
@@ -30,6 +30,8 @@ Hence ... the point, and goal, of this project.
 
 ### Starting Point
 The initial code-commit is a full builds-from-source version of EhBASIC that emits a `basic.bin` file that be burned to ROM on a standard BE6502 and "just work", albeit needing terminal pacing (0.6s line, and 0.02s character pacing seems safe, if very slow, for larger programs; smaller programs can use lower values).
+
+*Most of the work, here, was already done by others; all I've done is bring the appropriate parts together in one place, made a few adjustments/tweaks, tidied up some config and the build process for ca65.*
 
 #### v. Next
 My intention is that the next step in the project, barring any clean-up, is to implement serial flow-control and input buffering for BE6502 builds that have that enabled in hardware.
