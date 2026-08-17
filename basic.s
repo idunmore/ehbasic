@@ -1321,10 +1321,18 @@ LAB_1491
       PLA                     ; pull return address low byte
       TAX                     ; copy return address low byte
       PLA                     ; pull return address high byte
+
+; the return address is about to be written to $01FE/$01FF while the stack
+; pointer is still above it, so an interrupt taken here would push its own
+; PC and status over the top of it and the RTS below would return into the
+; middle of this routine. mask interrupts until the stack pointer is lowered
+
+      SEI                     ; no interrupts over the saved return address
       STX   LAB_SKFE          ; save to cleared stack
       STA   LAB_SKFF          ; save to cleared stack
       LDX   #$FD              ; new stack pointer
       TXS                     ; reset stack
+      CLI                     ; pushes now land below the saved address
       LDA   #$00              ; clear byte
 ;*** fix p2: no longer necessary as the continue pointer is saved anyway
 ;      STA   Cpntrh            ; clear continue pointer high byte
