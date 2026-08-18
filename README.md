@@ -33,8 +33,17 @@ The initial code-commit is a full builds-from-source version of EhBASIC that emi
 
 *Most of the work, here, was already done by others; all I've done is bring the appropriate parts together in one place, made a few adjustments/tweaks, tidied up some config and the build process for ca65.*
 
-#### v. Next
-My intention is that the next step in the project, barring any clean-up, is to implement serial flow-control and input buffering for BE6502 builds that have that enabled in hardware.
+#### v. Next (is now v. Current)
+
+My original intention was that the next step in the project, barring any clean-up, wass to implement serial flow-control and input buffering for BE6502 builds that have that enabled in hardware.
+
+**This is now done.**
+
+Thus what was to be "v. Next" is *now* "v. Current".
+
+Note that the flow control is based on Ben's build that fixes the 65C51 UART bug, and requires running a connection from PA0 to CTS.
+
+This update also includes a fix for an interrupt safety issue (see the commit details).
 
 ## Origins & EhBASIC
 

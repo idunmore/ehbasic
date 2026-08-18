@@ -24,7 +24,7 @@ RES_vec
       CLD                     ; clear decimal mode
       LDX   #$FF              ; empty stack
       TXS                     ; set the stack
-      JSR ACIAsetup
+      JSR   ACIAsetup         ; init ring buffer and ACIA (receiver IRQ enabled)
 
 ; set up vectors and interrupt code, copy them to page 2
 
@@ -34,6 +34,11 @@ LAB_stlp
       STA   VEC_IN-1,Y        ; save to RAM
       DEY                     ; decrement index/count
       BNE   LAB_stlp          ; loop if more to do
+
+; the RAM interrupt code is only valid now the copy above has run, so this is
+; the earliest point at which interrupts can safely be let in
+
+      CLI                     ; enable interrupts, receive buffer goes live
 
 ; now do the signon message, Y = $00 here
 
@@ -61,74 +66,163 @@ LAB_nokey
 LAB_dowarm
       JMP   LAB_WARM          ; do EhBASIC warm start
 
-; Polled 65c51 I/O routines adapted to EhBASIC. Delay routine from
-; http://forum.6502.org/viewtopic.php?f=4&t=2543&start=30#p29795
-ACIA_RX      = $5000
-ACIA_TX      = $5000
+; Interrupt driven 65C51 I/O for EhBASIC, with a 256 byte circular receive
+; buffer and hardware flow control via VIA port A bit 0.
+;
+; PA0 low  = "keep sending", PA0 high = "stop sending". It is asserted by the
+; IRQ handler once the buffer holds HIGH_WATER bytes and released by CHRIN
+; once the backlog drops below LOW_WATER. PA0 must be wired to the CTS input
+; of the host's serial adapter for this to have any effect.
+
+ACIA_DATA    = $5000          ; read = RX, write = TX
 ACIA_STATUS  = $5001
-ACIA_COMMAND = $5002
-ACIA_CONTROL = $5003
+ACIA_CMD     = $5002
+ACIA_CTRL    = $5003
+
+PORTA        = $6001          ; VIA port A, bit 0 drives host CTS
+DDRA         = $6003          ; VIA port A data direction
+
+HIGH_WATER   = $F0            ; buffer fill at which we tell the host to stop
+LOW_WATER    = $B0            ; buffer fill at which we let it start again
+BUF_FULL     = $FF            ; buffer holds $FF bytes, not $100. the pointers
+                              ; are equal when it is empty, so a fill of $00
+                              ; could not be told apart from a full buffer
+
+; the ring buffer must be page aligned, the pointers are single bytes and rely
+; on wrapping at the page boundary. $E4-$EE is unused by EhBASIC (see basic.s)
+
+READ_PTR     = $E4            ; ring buffer read index
+WRITE_PTR    = $E5            ; ring buffer write index
+RX_TEMP      = $E6            ; holds a received byte over the flow control check
+
+      .segment "INPUT_BUFFER"
+
+INPUT_BUFFER:
+      .res  $100              ; 256 byte circular receive buffer
+
+      .segment "CODE"
 
 ACIAsetup
-      LDA #$00                ; write anything to status register for program reset
-      STA ACIA_STATUS
-      LDA #$0B                ; %0000 1011 = Receiver odd parity check
-                              ;              Parity mode disabled
-                              ;              Receiver normal mode
-                              ;              RTSB Low, trans int disabled
-                              ;              IRQB disabled
-                              ;              Data terminal ready (DTRB low)
-      STA ACIA_COMMAND        ; set command register  
-      LDA #$1F                ; %0001 1111 = 19200 Baud
+      JSR   INIT_BUFFER       ; empty the ring buffer, release host CTS
+      LDA   #$00              ; write anything to status register for program reset
+      STA   ACIA_STATUS
+      LDA   #$1F              ; %0001 1111 = 19200 Baud
                               ;              External receiver
                               ;              8 bit words
                               ;              1 stop bit
-      STA ACIA_CONTROL        ; set control register  
+      STA   ACIA_CTRL         ; set control register
+      LDA   #$89              ; %1000 1001 = Parity mode disabled
+                              ;              Receiver normal mode (no echo)
+                              ;              RTSB Low, trans int disabled
+                              ;              Receiver IRQ enabled
+                              ;              Data terminal ready (DTRB low)
+      STA   ACIA_CMD          ; set command register
       RTS
 
-ACIAout
-      PHA                     ; save A
-      LDA ACIA_STATUS         ; Read (and ignore) ACIA status register
-      PLA                     ; restore A
-      STA ACIA_TX             ; write byte
-      JSR ACIAdelay           ; delay because of bug
+; initialise the circular input buffer and make PA0 an output, driven low so
+; the host is clear to send
+;
+; Modifies: flags, A
+
+INIT_BUFFER
+      LDA   READ_PTR          ; buffer is empty when write index ..
+      STA   WRITE_PTR         ; .. matches read index
+      LDA   #$01              ; PA0 to output, the rest stay as inputs
+      STA   DDRA
+      LDA   #$FE
+      AND   PORTA             ; clear PA0 ..
+      STA   PORTA             ; .. host is clear to send
       RTS
 
-ACIAdelay
-      PHY                     ; Save Y Reg
-      PHX                     ; Save X Reg
-DELAY_LOOP
-      LDY   #6                ; Get delay value (clock rate in MHz 2 clock cycles)
-MINIDLY
-      LDX   #$68              ; Seed X reg
-DELAY_1
-      DEX                     ; Decrement low index
-      BNE   DELAY_1           ; Loop back until done
-      DEY                     ; Decrease by one
-      BNE   MINIDLY           ; Loop until done
-      PLX                     ; Restore X Reg
-      PLY                     ; Restore Y Reg
-DELAY_DONE
-      RTS                     ; Delay done, return
+; write the byte in A to the circular input buffer
+;
+; Modifies: flags, X
 
-ACIAin
-      LDA ACIA_STATUS         ; get ACIA status
-      AND #$08                ; mask rx buffer status flag
-      BEQ LAB_nobyw           ; branch if no byte waiting
-      LDA ACIA_RX             ; get byte from ACIA data port
+WRITE_BUFFER
+      LDX   WRITE_PTR
+      STA   INPUT_BUFFER,X
+      INC   WRITE_PTR
+      RTS
+
+; read a byte from the circular input buffer into A
+;
+; Modifies: flags, A, X
+
+READ_BUFFER
+      LDX   READ_PTR
+      LDA   INPUT_BUFFER,X
+      INC   READ_PTR
+      RTS
+
+; return in A the number of unread bytes in the circular input buffer
+;
+; Modifies: flags, A
+
+BUFFER_SIZE
+      LDA   WRITE_PTR
+      SEC
+      SBC   READ_PTR
+      RTS
+
+; non halting scan of the input device for EhBASIC's V_INPT vector. returns
+; with carry set and the byte in A, or carry clear if the buffer is empty.
+;
+; no echo here, EhBASIC echoes for itself via LAB_PRNA so that it can keep
+; track of the terminal column, and GET must not echo at all
+;
+; the byte must be the last thing loaded into A. EhBASIC tests Z on return to
+; discard NULLs, so a PLX or PLA after it would leave the wrong flags behind
+;
+; Modifies: flags, A
+
+CHRIN
+      PHX                     ; save X, EhBASIC holds its line index there
+      JSR   BUFFER_SIZE       ; anything waiting?
+      BEQ   @no_keypressed    ; no, exit with carry clear
+
+      JSR   READ_BUFFER       ; take the oldest byte
+      STA   RX_TEMP           ; hold it over the flow control check
+      JSR   BUFFER_SIZE       ; how much backlog is left?
+      CMP   #LOW_WATER
+      BCS   @mostly_full      ; still too full to restart the host
+
+      LDA   #$FE
+      AND   PORTA             ; clear PA0 ..
+      STA   PORTA             ; .. host is clear to send again
+@mostly_full:
+      PLX                     ; restore X
       SEC                     ; flag byte received
+      LDA   RX_TEMP           ; get the byte, sets Z/N on it and leaves C alone
       RTS
-LAB_nobyw
+
+@no_keypressed:
+      PLX                     ; restore X
       CLC                     ; flag no byte received
 no_load                       ; empty load vector for EhBASIC
 no_save                       ; empty save vector for EhBASIC
       RTS
 
+; send the byte in A to the output device for EhBASIC's V_OUTP vector. the
+; delay is the workaround for the 65C51 transmit bug, the status register
+; never reports the transmitter as empty so it cannot be polled
+;
+; Modifies: flags
+
+CHROUT
+      PHA                     ; save A
+      STA   ACIA_DATA         ; write byte
+      LDA   #$FF              ; initialise delay loop
+@txdelay:
+      DEC                     ; decrement A
+      BNE   @txdelay          ; until A gets to 0
+      PLA                     ; restore A
+      RTS
+
 ; vector tables
 
 LAB_vec
-      .word ACIAin            ; byte in from simulated ACIA
-      .word ACIAout           ; byte out to simulated ACIA
+      .word CHRIN             ; byte in from ACIA receive buffer
+      .word CHROUT            ; byte out to ACIA
       .word no_load           ; null load vector for EhBASIC
       .word no_save           ; null save vector for EhBASIC
 
@@ -160,13 +254,61 @@ LAB_mess
       .byte $0D,$0A,"6502 EhBASIC [C]old/[W]arm ?",$00
                               ; sign on string
 
+; hardware interrupt handler. this owns the IRQ vector rather than EhBASIC so
+; that received bytes reach the ring buffer. anything that is not the ACIA is
+; passed on to EhBASIC's own handler in RAM, which is what makes ON IRQ work
+;
+; this must sit outside LAB_vec..END_CODE, that block gets copied to page 2
+
+ACIA_IRQ
+      PHA                     ; save A
+      PHX                     ; save X, WRITE_BUFFER uses it
+      LDA   ACIA_STATUS       ; get ACIA status, this clears its IRQ flag
+      BPL   @chain            ; b7 clear, the ACIA did not raise this one
+
+      AND   #$08              ; mask rx buffer status flag
+      BEQ   @done             ; ACIA interrupt but no byte waiting
+
+      JSR   BUFFER_SIZE       ; is there room for it?
+      CMP   #BUF_FULL
+      BEQ   @overflow         ; no, drop it rather than lap the read pointer
+
+      LDA   ACIA_DATA         ; get byte from ACIA data port
+      JSR   WRITE_BUFFER      ; add it to the ring buffer
+      JSR   BUFFER_SIZE       ; how full are we now?
+      CMP   #HIGH_WATER
+      BCC   @done             ; still room, leave the host alone
+
+      LDA   #$01
+      ORA   PORTA             ; set PA0 ..
+      STA   PORTA             ; .. tell the host to stop sending
+@done:
+      PLX                     ; restore X
+      PLA                     ; restore A
+      RTI
+
+; the buffer is already full, so this byte is lost either way. dropping it
+; keeps the buffer coherent, where overwriting would lap the read pointer and
+; corrupt everything still queued behind it. only reachable when the host is
+; ignoring PA0, either by choice or because the CTS wire is not fitted
+
+@overflow:
+      LDA   ACIA_DATA         ; discard it, the read is still needed to clear
+                              ; the receiver data register full flag
+      BRA   @done
+
+@chain:
+      PLX                     ; restore X
+      PLA                     ; restore A
+      JMP   IRQ_vec           ; hand to EhBASIC's RAM handler, it does the RTI
+
 ; system vectors
 
       .segment "VECTORS"
 
       .word NMI_vec           ; NMI vector
       .word RES_vec           ; RESET vector
-      .word IRQ_vec           ; IRQ vector
+      .word ACIA_IRQ          ; IRQ vector
 
       .end RES_vec            ; set start at reset vector
       
