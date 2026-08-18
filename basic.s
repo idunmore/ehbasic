@@ -1003,6 +1003,17 @@ LAB_INLN
                               ; $08 as delete key (BACKSPACE on standard keyboard)
 LAB_134B
       JSR   LAB_PRNA          ; go print the character
+
+; the [BACKSPACE] above only moved the cursor back over the deleted character,
+; so overwrite it with a space and back up again to leave the cursor where the
+; character used to be. both go out through V_OUTP rather than LAB_PRNA, which
+; would count the space as a printable column and could line wrap mid edit
+
+      LDA   #' '              ; space, erasing the character
+      JSR   V_OUTP            ; output it
+      LDA   #$08              ; [BACKSPACE], back over the space
+      JSR   V_OUTP            ; output it
+
       DEX                     ; decrement the buffer counter (delete)
       .byte $2C               ; make LDX into BIT abs
 
