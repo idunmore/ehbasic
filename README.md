@@ -31,7 +31,7 @@ Hence ... the point, and goal, of this project.
 ### Starting Point
 The initial code-commit is a full builds-from-source version of EhBASIC that emits a `basic.bin` file that be burned to ROM on a standard BE6502 and "just work", albeit needing terminal pacing (0.6s line, and 0.02s character pacing seems safe, if very slow, for larger programs; smaller programs can use lower values).
 
-*Most of the work, here, was already done by others; all I've done is bring the appropriate parts together in one place, made a few adjustments/tweaks, tidied up some config and the build process for ca65.*
+*Most of the work, here, was already done by others (the principal source is from [Klaus2m5](https://github.com/Klaus2m5/6502_EhBASIC_V2.22)); all I've done is bring the appropriate parts together in one place, made a few adjustments/tweaks, tidied up some config and the build process for ca65.*
 
 #### v. Next (is now v. Current)
 
