@@ -840,6 +840,12 @@ LAB_1274
 
 LAB_127D
       JSR   LAB_1357          ; call for BASIC input
+
+; a [CTRL-C] typed while waiting at the prompt is not a break, it just gets
+; ignored by the line input above. drop it here, once the line is complete
+; and before it is interpreted, or it would stop whatever is typed next
+
+      STZ   BRK_FLAG          ; discard any [CTRL-C] typed at the prompt
 LAB_1280
       STX   Bpntrl            ; set BASIC execute pointer low byte
       STY   Bpntrh            ; set BASIC execute pointer high byte
@@ -7949,7 +7955,11 @@ PG2_TABS
       .byte $00               ; ctrl-c flag           -     $00 = enabled
       .byte $00               ; ctrl-c byte           -     GET needs this
       .byte $00               ; ctrl-c byte timeout   -     GET needs this
-      .word CTRLC             ; ctrl c check vector
+      .word CCHECK            ; ctrl c check vector, see min_mon.s. the stock
+                              ; CTRLC below reads the input device to look for
+                              ; a [CTRL-C] and swallows whatever it finds, so
+                              ; the check is done from the interrupt handler
+                              ; instead and this vector points at that version
 ;     .word xxxx              ; non halting key input -     monitor to set this
 ;     .word xxxx              ; output vector         -     monitor to set this
 ;     .word xxxx              ; load vector           -     monitor to set this

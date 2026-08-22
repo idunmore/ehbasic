@@ -15,6 +15,12 @@
 
       .export CHRIN, CHROUT
 
+; set by the interrupt handler when a [CTRL-C] comes in, tested by CCHECK
+; below. it has to be equated ahead of the include so that basic.s assembles
+; its one reference to it as zero page
+
+BRK_FLAG     = $E7            ; [CTRL-C] seen by the interrupt handler
+
       .include "basic.s"
 
 ; put the IRQ and MNI code in RAM so that it can be changed
@@ -115,6 +121,7 @@ BUF_FULL     = $FF            ; buffer holds $FF bytes, not $100. the pointers
 READ_PTR     = $E4            ; ring buffer read index
 WRITE_PTR    = $E5            ; ring buffer write index
 RX_TEMP      = $E6            ; holds a received byte over the flow control check
+                              ; BRK_FLAG is $E7, equated above the include
 
       .segment "INPUT_BUFFER"
 
@@ -148,6 +155,7 @@ ACIAsetup
 INIT_BUFFER
       LDA   READ_PTR          ; buffer is empty when write index ..
       STA   WRITE_PTR         ; .. matches read index
+      STZ   BRK_FLAG          ; no [CTRL-C] seen yet
       LDA   #$01              ; PA0 to output, the rest stay as inputs
       STA   DDRA
       LDA   #$FE
@@ -239,6 +247,32 @@ CHROUT
       PLA                     ; restore A
       RTS
 
+; EhBASIC's [CTRL-C] check, reached through VEC_CC (see PG2_TABS in basic.s).
+;
+; this replaces the stock CTRLC, which scans the input device itself and keeps
+; whatever it finds in ccbyte under a countdown that only GET ever reads. with
+; input buffered that reliably swallows a typed or pasted character every time
+; a direct command runs or a program passes a statement boundary. the received
+; byte is examined by the interrupt handler instead, so nothing is taken out of
+; the input stream here and a [CTRL-C] is still seen even with type ahead
+; queued up behind it
+;
+; falls through to EhBASIC's own ON IRQ/ON NMI checks, exactly as CTRLC does
+
+CCHECK
+      LDA   ccflag            ; get [CTRL-C] check flag
+      BNE   @nobreak          ; exit if inhibited
+
+      LDA   BRK_FLAG          ; has the interrupt handler seen a [CTRL-C]?
+      BEQ   @nobreak          ; no, nothing to do
+
+      STZ   BRK_FLAG          ; take it, one [CTRL-C] is one break
+      LDA   #$03              ; [CTRL-C], LAB_1636 tests for it
+      JMP   LAB_1636          ; go stop the program
+
+@nobreak:
+      JMP   LAB_FBA2          ; go do the interrupt checks and return
+
 ; vector tables
 
 LAB_vec
@@ -295,6 +329,16 @@ ACIA_IRQ
       BEQ   @overflow         ; no, drop it rather than lap the read pointer
 
       LDA   ACIA_DATA         ; get byte from ACIA data port
+
+; [CTRL-C] is noted here rather than by pulling bytes out of the buffer later,
+; which is what the stock check does. it still goes into the buffer so that
+; GET and INPUT can see it, the flag is only how CCHECK finds out about it
+
+      CMP   #$03              ; [CTRL-C]?
+      BNE   @buffer           ; no, just buffer it
+
+      STA   BRK_FLAG          ; flag the break, A is non zero so the flag is set
+@buffer:
       JSR   WRITE_BUFFER      ; add it to the ring buffer
       JSR   BUFFER_SIZE       ; how full are we now?
       CMP   #HIGH_WATER

@@ -47,6 +47,23 @@ This update also includes a fix for an interrupt safety issue (see the commit de
 
 ### Additional Enhancements
 
+#### Type-Ahead No Longer Loses Characters
+
+Stock EhBASIC looks for `[CTRL-C]` by reading the input device itself, from
+`CTRLC`, which runs after every direct command and between the statements of a
+running program. Whatever byte it finds is put in `ccbyte` under a countdown
+that only `GET` ever reads, so anything that is not a `[CTRL-C]` is swallowed.
+With input buffered, that reliably eats a character whenever anything is typed
+or pasted ahead of the prompt: `NEW` followed immediately by `10 PRINT "A"`
+would store line **0**.
+
+The `[CTRL-C]` is now spotted by the serial interrupt handler and recorded in a
+flag, and `VEC_CC` points at a check that reads that flag instead of the input
+stream (`CCHECK` in `min_mon.s`). Nothing is taken out of the input, and
+`[CTRL-C]` still breaks a running program even with type-ahead queued up behind
+it. A `[CTRL-C]` typed at the `Ready` prompt is discarded once the line it was
+typed into is complete, so it does not stop whatever is entered next.
+
 #### True BACKSPACE Support
 
 `BACKSPACE` now visually deletes the character it back-spaces over, rather than leaving it on the display.  This works for all input.
