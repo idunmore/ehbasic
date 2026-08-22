@@ -45,6 +45,64 @@ Note that the flow control is based on Ben's build that fixes the 65C51 UART bug
 
 This update also includes a fix for an interrupt safety issue (see the commit details).
 
+### Additional Enhancements
+
+#### True BACKSPACE Support
+
+`BACKSPACE` now visually deletes the character it back-spaces over, rather than leaving it on the display.  This works for all input.
+
+#### WozMon Monitor in ROM
+
+I like having WozMon available on my BE6502 ROMs, particularly those involving BASIC in some form (in addition to this EhBASIC version, I've also built a modified version of [Microsoft BASIC](https://github.com/idunmore/msbasic)).  You can switch back/forth between EhBASIC and WozMon.  Be sure to choose [W]arm start when coming back into EhBASIC if you want to retain the program that was there when you ran `MONITOR`.
+
+## WozMon
+
+The ROM contains [WozMon](https://www.sbprojects.net/projects/apple1/wozmon.php), Steve Wozniak's 256 byte Apple 1 monitor, so you can examine and change memory, and run code, without leaving BASIC behind.
+
+From the `Ready` prompt (or from inside a program):
+
+```
+MONITOR
+```
+
+WozMon's usual syntax applies: `FE00` examines a location, `FE00.FE1F` dumps a range, `0500: DE AD BE EF` stores bytes, and `<addr>R` runs from an address.
+
+### Getting back
+
+The bottom of the ROM is a jump table, so these addresses stay put no matter how the code around them grows:
+
+| Address | `R` command | Effect |
+| --- | --- | --- |
+| `$8000` | `8000R` | Sign on, then the `[C]old/[W]arm ?` prompt |
+| `$8003` | `8003R` | Force a cold start |
+| `$8006` | `8006R` | Force a warm start, no prompt |
+
+Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` followed by `W`, or `8006R` on its own, drops you back at `Ready` with your program still listable and runnable.
+
+### ROM and RAM map
+
+| Range | Contents |
+| --- | --- |
+| `$8000-$8008` | entry jump table |
+| `$8009-$A995` | EhBASIC, the minimal monitor and the custom commands |
+| `$FE00-$FEFA` | WozMon |
+| `$FFFA-$FFFF` | NMI, RESET and IRQ vectors |
+| `$24-$2B` | WozMon zero page, taken from EhBASIC's unused `$13-$5A` |
+| `$0280-$02FF` | WozMon line buffer, in the tail of page 2 above `Ibuffe` |
+
+WozMon lives at `$FE00` rather than its native `$FF00` because the vectors at `$FFFA`
+leave only 250 bytes there, and this version is slightly larger. It shares `CHRIN` and
+`CHROUT` with the rest of the ROM instead of carrying its own copy of the 65C51 transmit
+bug workaround, so it gets the same interrupt driven input, flow control and visual
+backspace as BASIC does.
+
+### Adding your own commands
+
+`MONITOR` is a *real* EhBASIC keyword, not a `CALL`. Adding another follows the same four
+table edits in `basic.s` — a `TK_` equate, a `LAB_CTBL` vector, a keyword table entry
+under its first letter, and a `LAB_KEYT` entry for `LIST` to detokenize it — with the
+command body itself in `custom_commands.s`.
+
 ## Origins & EhBASIC
 
 This version of EhBASIC is **derived from EhBASIC**, developed by Lee Davidson. The EhBASIC license allows for non-commerical use only. The most recent release and manual is hosted [here](https://github.com/Klaus2m5/6502_EhBASIC_V2.22), and a mirror of Lee's website can be found [here](http://retro.hansotten.nl/6502-sbc/lee-davison-web-site/).

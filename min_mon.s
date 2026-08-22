@@ -5,6 +5,16 @@
 ; running [F6] then start the code with the RESET [CTRL][SHIFT]R. Just selecting RUN
 ; will do nothing, you'll still have to do a reset to run the code.
 
+; The MONITOR command body lives in custom_commands.s. importing it here,
+; ahead of the include, keeps the edits to basic.s down to table entries
+
+      .import LAB_MONITOR
+
+; CHRIN and CHROUT are the serial primitives, wozmon.s uses them rather than
+; carrying its own copy of the 65C51 transmit bug workaround
+
+      .export CHRIN, CHROUT
+
       .include "basic.s"
 
 ; put the IRQ and MNI code in RAM so that it can be changed
@@ -15,6 +25,17 @@ NMI_vec     = IRQ_vec+$0A     ; NMI code vector
 ; now the code. all this does is set up the vectors and interrupt code
 ; and wait for the user to select [C]old or [W]arm start. nothing else
 ; fits in less than 128 bytes
+
+; fixed ROM entry points. WozMon has no way to name a label, so these have to
+; sit at addresses that do not move as the code around them grows, hence a
+; jump table pinned to the bottom of the ROM by basic.cfg rather than raw code
+
+      .segment "ENTRY"
+
+      JMP   RES_vec           ; $8000 sign on, then the [C]old/[W]arm prompt
+      JMP   LAB_COLD          ; $8003 force a cold start
+      JMP   LAB_WARM          ; $8006 force a warm start, no prompt. resumes
+                              ;       the BASIC program that is in memory
 
       .segment "CODE"         ; pretend this is in a 1/8K ROM
 

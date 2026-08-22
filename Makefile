@@ -1,15 +1,26 @@
 CA65=ca65
 LD65=ld65
+CA65FLAGS=--cpu 65C02 --feature labels_without_colons
 
-basic.bin: min_mon.o
-	$(LD65) -o bin/basic.bin \
-		-C basic.cfg \
-		obj/min_mon.o
+OBJS=obj/min_mon.o obj/wozmon.o obj/custom_commands.o
 
-min_mon.o: min_mon.s basic.s
+bin/basic.bin: $(OBJS) basic.cfg
 	mkdir -p bin
+	$(LD65) -o bin/basic.bin -C basic.cfg -m bin/basic.map $(OBJS)
+
+obj/min_mon.o: min_mon.s basic.s
 	mkdir -p obj
-	$(CA65) --cpu 65C02 --feature labels_without_colons min_mon.s -o obj/min_mon.o
+	$(CA65) $(CA65FLAGS) min_mon.s -o $@
+
+obj/wozmon.o: wozmon.s
+	mkdir -p obj
+	$(CA65) $(CA65FLAGS) wozmon.s -o $@
+
+obj/custom_commands.o: custom_commands.s
+	mkdir -p obj
+	$(CA65) $(CA65FLAGS) custom_commands.s -o $@
 
 clean:
-	rm -f obj/min_mon.o bin/basic.bin
+	rm -f $(OBJS) bin/basic.bin bin/basic.map
+
+.PHONY: clean

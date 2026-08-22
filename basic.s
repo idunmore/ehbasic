@@ -63,6 +63,10 @@ nums_1            = Itempl    ; number to bin/hex string convert MSB
 nums_2            = nums_1+1  ; number to bin/hex string convert
 nums_3            = nums_1+2  ; number to bin/hex string convert LSB
 
+; $13 to $5A is not used by EhBASIC, every reference in this file is by name
+; and none of them name a location in that range. wozmon.s claims $24-$2B out
+; of it, the rest is free.
+
 Srchc             = $5B       ; search character
 Temp3             = Srchc     ; temp byte used in number routines
 Scnquo            = $5C       ; scan-between-quotes flag
@@ -361,10 +365,11 @@ TK_BITSET         = TK_SWAP+1       ; BITSET token
 TK_BITCLR         = TK_BITSET+1     ; BITCLR token
 TK_IRQ            = TK_BITCLR+1     ; IRQ token
 TK_NMI            = TK_IRQ+1        ; NMI token
+TK_MONITOR        = TK_NMI+1        ; MONITOR token
 
 ; secondary command tokens, can't start a statement
 
-TK_TAB            = TK_NMI+1        ; TAB token
+TK_TAB            = TK_MONITOR+1    ; TAB token
 TK_ELSE           = TK_TAB+1        ; ELSE token
 TK_TO             = TK_ELSE+1       ; TO token
 TK_FN             = TK_TO+1         ; FN token
@@ -8181,6 +8186,7 @@ LAB_CTBL
       .word LAB_BITCLR-1      ; BITCLR          new command
       .word LAB_IRQ-1         ; IRQ             new command
       .word LAB_NMI-1         ; NMI             new command
+      .word LAB_MONITOR-1     ; MONITOR         new command
 
 ; function pre process routine table
 
@@ -8507,6 +8513,9 @@ LBB_MIDS
       .byte "ID$(",TK_MIDS    ; MID$(
 LBB_MIN
       .byte "IN(",TK_MIN      ; MIN(
+LBB_MONITOR
+      .byte "ONITOR",TK_MONITOR
+                              ; MONITOR
       .byte $00
 TAB_ASCN
 LBB_NEW
@@ -8716,6 +8725,8 @@ LAB_KEYT
       .word LBB_IRQ           ; IRQ
       .byte 3,'N'
       .word LBB_NMI           ; NMI
+      .byte 7,'M'
+      .word LBB_MONITOR       ; MONITOR
 
 ; secondary commands (can't start a statement)
 
