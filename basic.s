@@ -367,12 +367,27 @@ TK_IRQ            = TK_BITCLR+1     ; IRQ token
 TK_NMI            = TK_IRQ+1        ; NMI token
 TK_MONITOR        = TK_NMI+1        ; MONITOR token
 
-; LCD commands, see custom_commands.s. these have to sit with the primary
+; the inline assembler, see assembler.s. these have to sit with the primary
 ; commands, below TK_TAB, because only tokens before TAB can start a statement.
-; LCD_BUILT comes from min_mon.s, which settles it before this include
+; ENDASM never actually runs - reaching it means an ENDASM with no ASM above it
+; - but it still needs a token so that the tokenizer and LIST both know it.
+; ASM_BUILT comes from min_mon.s, which settles it before this include
+
+.if ASM_BUILT
+TK_ASM            = TK_MONITOR+1    ; ASM token
+TK_ASSEMBLE       = TK_ASM+1        ; ASSEMBLE token
+TK_DASM           = TK_ASSEMBLE+1   ; DASM token
+TK_ENDASM         = TK_DASM+1       ; ENDASM token
+TK_LASTASM        = TK_ENDASM       ; last assembler token
+.else
+TK_LASTASM        = TK_MONITOR      ; nothing added, carry on from MONITOR
+.endif
+
+; LCD commands, see custom_commands.s. same rule, they have to stay below
+; TK_TAB. LCD_BUILT comes from min_mon.s the same way ASM_BUILT does
 
 .if LCD_BUILT
-TK_LCDCGBYTE      = TK_MONITOR+1    ; LCDCGBYTE token
+TK_LCDCGBYTE      = TK_LASTASM+1    ; LCDCGBYTE token
 TK_LCDCGCHRS      = TK_LCDCGBYTE+1  ; LCDCGCHRS token
 TK_LCDCGRAM       = TK_LCDCGCHRS+1  ; LCDCGRAM token
 TK_LCDCLS         = TK_LCDCGRAM+1   ; LCDCLS token
@@ -385,15 +400,14 @@ TK_LCDHOME        = TK_LCDDDRAM+1   ; LCDHOME token
 TK_LCDMOVECUR     = TK_LCDHOME+1    ; LCDMOVECUR token
 TK_LCDPRINT       = TK_LCDMOVECUR+1 ; LCDPRINT token
 TK_LCDSCROLL      = TK_LCDPRINT+1   ; LCDSCROLL token
+TK_LASTPRIM       = TK_LCDSCROLL    ; last primary command token
+.else
+TK_LASTPRIM       = TK_LASTASM      ; nothing added, carry on from above
 .endif
 
 ; secondary command tokens, can't start a statement
 
-.if LCD_BUILT
-TK_TAB            = TK_LCDSCROLL+1  ; TAB token
-.else
-TK_TAB            = TK_MONITOR+1    ; TAB token
-.endif
+TK_TAB            = TK_LASTPRIM+1   ; TAB token
 TK_ELSE           = TK_TAB+1        ; ELSE token
 TK_TO             = TK_ELSE+1       ; TO token
 TK_FN             = TK_TO+1         ; FN token
@@ -458,6 +472,15 @@ TK_VPTR           = TK_TWOPI+1      ; VARPTR token
 TK_LEFTS          = TK_VPTR+1       ; LEFT$ token
 TK_RIGHTS         = TK_LEFTS+1      ; RIGHT$ token
 TK_MIDS           = TK_RIGHTS+1     ; MID$ token
+
+; SYM() looks a name up in the assembler's symbol table. the function dispatch
+; at LAB_1BEE is "SBC #TK_SGN" with no upper bound test, and LEFT$/RIGHT$/MID$
+; are special cased through their LAB_FTPL entry rather than by position, so
+; appending past MID$ here is safe
+
+.if ASM_BUILT
+TK_SYM            = TK_MIDS+1       ; SYM( token
+.endif
 
 ; offsets from a base of X or Y
 
@@ -889,6 +912,11 @@ LAB_1280
 ; handle new BASIC line
 
 LAB_1295
+.if ASM_BUILT
+      STZ   ASM_FLG           ; any edit to the program makes the assembled
+                              ; image stale. inserts and deletes both come
+                              ; through here, a delete being an empty line
+.endif
       JSR   LAB_GFPN          ; get fixed-point number into temp integer
       JSR   LAB_13A6          ; crunch keywords into Basic tokens
       STY   Ibptr             ; save index pointer to end of crunched line
@@ -1321,6 +1349,12 @@ LAB_NEW
       BNE   LAB_1460          ; exit if not end of statement (to do syntax error)
 
 LAB_1463
+.if ASM_BUILT
+      STZ   ASM_FLG           ; "NEW" drops the assembled image. cold start
+                              ; calls in here too, which is what initialises
+                              ; ASM_FLG - $13-$5A is in none of the bulk
+                              ; initialise sets
+.endif
       LDA   #$00              ; clear A
       TAY                     ; clear Y
       STA   (Smeml),Y         ; clear first line, next line pointer, low byte
@@ -1390,6 +1424,11 @@ LAB_14A6
 ; perform CLEAR
 
 LAB_CLEAR
+.if ASM_BUILT
+      STZ   ASM_FLG           ; "CLEAR" drops the assembled image too. note
+                              ; this is deliberately not in LAB_147A below,
+                              ; which RUN also passes through
+.endif
       BEQ   LAB_147A          ; if no following token go do "CLEAR"
 
                               ; else there was a following token (go do syntax error)
@@ -8221,6 +8260,12 @@ LAB_CTBL
       .word LAB_IRQ-1         ; IRQ             new command
       .word LAB_NMI-1         ; NMI             new command
       .word LAB_MONITOR-1     ; MONITOR         new command
+.if ASM_BUILT
+      .word LAB_ASM-1         ; ASM             new command
+      .word LAB_ASSEMBLE-1    ; ASSEMBLE        new command
+      .word LAB_DASM-1        ; DASM            new command
+      .word LAB_ENDASM-1      ; ENDASM          new command
+.endif
 .if LCD_BUILT
       .word LCDCGBYTE-1       ; LCDCGBYTE       new command
       .word LCDCGCHRS-1       ; LCDCGCHRS       new command
@@ -8276,6 +8321,9 @@ LAB_FTPM    = LAB_FTPL+$01
       .word LAB_LRMS-1        ; LEFT$()   process string expression
       .word LAB_LRMS-1        ; RIGHT$()        "
       .word LAB_LRMS-1        ; MID$()          "
+.if ASM_BUILT
+      .word LAB_PPFS-1        ; SYM($)    process string expression in ()
+.endif
 
 ; action addresses for functions
 
@@ -8316,6 +8364,9 @@ LAB_FTBM    = LAB_FTBL+$01
       .word LAB_LEFT-1        ; LEFT$()
       .word LAB_RIGHT-1       ; RIGHT$()
       .word LAB_MIDS-1        ; MID$()
+.if ASM_BUILT
+      .word LAB_SYM-1         ; SYM()           new function
+.endif
 
 ; hierarchy and action addresses for operator
 
@@ -8452,6 +8503,13 @@ LBB_AND
       .byte "ND",TK_AND       ; AND
 LBB_ASC
       .byte "SC(",TK_ASC      ; ASC(
+.if ASM_BUILT
+LBB_ASM
+      .byte "SM",TK_ASM       ; ASM
+LBB_ASSEMBLE
+      .byte "SSEMBLE",TK_ASSEMBLE
+                              ; ASSEMBLE
+.endif
 LBB_ATN
       .byte "TN(",TK_ATN      ; ATN(
       .byte $00
@@ -8479,6 +8537,10 @@ LBB_COS
       .byte "OS(",TK_COS      ; COS(
       .byte $00
 TAB_ASCD
+.if ASM_BUILT
+LBB_DASM
+      .byte "ASM",TK_DASM     ; DASM
+.endif
 LBB_DATA
       .byte "ATA",TK_DATA     ; DATA
 LBB_DEC
@@ -8497,6 +8559,12 @@ LBB_DO
 TAB_ASCE
 LBB_ELSE
       .byte "LSE",TK_ELSE     ; ELSE
+.if ASM_BUILT
+LBB_ENDASM
+      .byte "NDASM",TK_ENDASM ; ENDASM note - "ENDASM" must come before "END",
+                              ; or it crunches to END followed by ASM, and that
+                              ; trailing ASM then matches TK_ASM as well
+.endif
 LBB_END
       .byte "ND",TK_END       ; END
 LBB_EOR
@@ -8680,6 +8748,10 @@ LBB_STRS
       .byte "TR$(",TK_STRS    ; STR$(
 LBB_SWAP
       .byte "WAP",TK_SWAP     ; SWAP
+.if ASM_BUILT
+LBB_SYM
+      .byte "YM(",TK_SYM      ; SYM(
+.endif
       .byte $00
 TAB_ASCT
 LBB_TAB
@@ -8815,6 +8887,16 @@ LAB_KEYT
       .word LBB_NMI           ; NMI
       .byte 7,'M'
       .word LBB_MONITOR       ; MONITOR
+.if ASM_BUILT
+      .byte 3,'A'
+      .word LBB_ASM           ; ASM
+      .byte 8,'A'
+      .word LBB_ASSEMBLE      ; ASSEMBLE
+      .byte 4,'D'
+      .word LBB_DASM          ; DASM
+      .byte 6,'E'
+      .word LBB_ENDASM        ; ENDASM
+.endif
 .if LCD_BUILT
       .byte 9,'L'
       .word LBB_LCDCGBYTE     ; LCDCGBYTE
@@ -8970,6 +9052,10 @@ LAB_KEYT
       .word LBB_RIGHTS        ; RIGHT$
       .byte 5,'M'             ;
       .word LBB_MIDS          ; MID$
+.if ASM_BUILT
+      .byte 4,'S'
+      .word LBB_SYM           ; SYM(
+.endif
 
 ; BASIC messages, mostly error messages
 
@@ -8992,15 +9078,23 @@ LAB_BAER
       .word ERR_CN            ;$1E continue error
       .word ERR_UF            ;$20 undefined function
       .word ERR_LD            ;$22 LOOP without DO
+.if ASM_BUILT
+      .word ERR_AS            ;$24 assembly syntax
+      .word ERR_UL            ;$26 undefined label
+      .word ERR_DL            ;$28 duplicate label
+      .word ERR_BR            ;$2A branch out of range
+      .word ERR_BK            ;$2C ASM block
+.endif
 
 ; I may implement these two errors to force definition of variables and
 ; dimensioning of arrays before use.
 
-;     .word ERR_UV            ;$24 undefined variable
+;     .word ERR_UV            ;$2E undefined variable (was $24 before the
+                              ; assembler errors above were added)
 
 ; the above error has been tested and works (see code and comments below LAB_1D8B)
 
-;     .word ERR_UA            ;$26 undimensioned array
+;     .word ERR_UA            ;$30 undimensioned array (was $26, as above)
 
 ERR_NF      .byte "NEXT without FOR",$00
 ERR_SN      .byte "Syntax",$00
@@ -9020,6 +9114,13 @@ ERR_ST      .byte "String too complex",$00
 ERR_CN      .byte "Can't continue",$00
 ERR_UF      .byte "Undefined function",$00
 ERR_LD      .byte "LOOP without DO",$00
+.if ASM_BUILT
+ERR_AS      .byte "Assembly syntax",$00
+ERR_UL      .byte "Undefined label",$00
+ERR_DL      .byte "Duplicate label",$00
+ERR_BR      .byte "Branch out of range",$00
+ERR_BK      .byte "ASM block",$00
+.endif
 
 ;ERR_UV     .byte "Undefined variable",$00
 

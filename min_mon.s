@@ -18,6 +18,22 @@ LCD_BUILT    = LCD_ENABLE
 LCD_BUILT    = 1
 .endif
 
+; the inline assembler defaults to in on the same terms, and for the same
+; reason has to be settled before basic.s is included. ASM_CPU picks which
+; instruction set the opcode tables carry, see assembler.s
+
+.ifdef ASM_ENABLE
+ASM_BUILT    = ASM_ENABLE
+.else
+ASM_BUILT    = 1
+.endif
+
+.ifdef ASM_CPU
+ASM_CPU_SEL  = ASM_CPU
+.else
+ASM_CPU_SEL  = 2
+.endif
+
       .import LAB_MONITOR
 
 ; the LCD driver and the LCD keyword bodies live in custom_commands.s too.
@@ -29,6 +45,14 @@ LCD_BUILT    = 1
       .import LCDCMD, LCDPRINT, LCDCGCHRS, LCDCLS, LCDHOME
       .import LCDCURPOS, LCDDDRAM, LCDCGRAM, LCDCGBYTE
       .import LCDCURENABLE, LCDCURBLINK, LCDMOVECUR, LCDSCROLL
+.endif
+
+; the inline assembler's command bodies live in assembler.s and disasm.s.
+; basic.s names all five entry points in LAB_CTBL and LAB_FTBL, so they have
+; to be imported ahead of the include as well
+
+.if ASM_BUILT
+      .import LAB_ASM, LAB_ENDASM, LAB_ASSEMBLE, LAB_DASM, LAB_SYM
 .endif
 
 ; CHRIN and CHROUT are the serial primitives, wozmon.s uses them rather than
@@ -48,6 +72,16 @@ LCD_BUILT    = 1
 ; its one reference to it as zero page
 
 BRK_FLAG     = $E7            ; [CTRL-C] seen by the interrupt handler
+
+; the assembler's "image is good" flag. basic.s clears it from three places -
+; a program line edit, NEW and CLEAR - so it has to be equated ahead of the
+; include, the same way BRK_FLAG is. the rest of the assembler's zero page is
+; declared in assembler.s and starts at $2D, immediately above this
+
+.if ASM_BUILT
+ASM_FLG      = $2C            ; $00 no image, $80 image assembled and good
+      .exportzp ASM_FLG
+.endif
 
 ; build time options, set from the Makefile
 ;
@@ -108,10 +142,45 @@ WCH_STEP     = 4              ; bytes checked per statement
 ; includes it. see the table at the top of custom_commands.s for what each one
 ; stood in for on the MS-BASIC side
 
+; the assembler in assembler.s needs a good deal of the same machinery, so the
+; parts both want are exported once, under a flag that is set when either is
+; built. exporting the same symbol twice is an error, hence the split
+
+HELP_BUILT   = LCD_BUILT + ASM_BUILT
+
+.if HELP_BUILT
+      .export LAB_GTBY, LAB_EVNM, LAB_EVEX
+      .export LAB_22B6, LAB_IGBY, LAB_GBYT
+      .exportzp Dtypef, ut1_pl
+.endif
+
 .if LCD_BUILT
-      .export LAB_GTBY, LAB_EVNM, LAB_EVIR, LAB_EVEX
-      .export LAB_296E, LAB_20AE, LAB_22B6, LAB_IGBY, LAB_GBYT
-      .exportzp Dtypef, FAC1_2, FAC1_3, ut1_pl
+      .export LAB_EVIR, LAB_296E, LAB_20AE
+      .exportzp FAC1_2, FAC1_3
+.endif
+
+; and the assembler's own set.
+;
+;   LAB_F2FX   FAC1 float to fixed, result in Itempl/h and in AY
+;   LAB_AYFC   signed 16 bit AY to FAC1, how SYM() returns its answer
+;   LAB_18C3   print null terminated string from AY
+;   LAB_295E   print XA as an unsigned integer, used for line numbers
+;   LAB_XERR   raise error number X and warm start
+;   LAB_1C01   scan for "," else syntax error
+;   LAB_PRNA   print the character in A, tracking the terminal column. this
+;              rather than CHROUT, or a listing would leave TPos wrong and
+;              upset PRINT's tab stops and line wrapping afterwards
+;   LAB_CRLF   new line, and the thing that resets that column count
+;   LAB_147A   the body of CLEAR, resets variables and string space
+;   LAB_KEYT   the LIST keyword table, which the line expander walks
+;   TK_ASM     needed to spot the start of a block while walking the program
+;   TK_ENDASM  and the end of one
+
+.if ASM_BUILT
+      .export LAB_F2FX, LAB_AYFC, LAB_18C3, LAB_295E, LAB_XERR
+      .export LAB_1C01, LAB_147A, LAB_KEYT, LAB_PRNA, LAB_CRLF
+      .exportzp TK_ASM, TK_ENDASM
+      .exportzp Smeml, Svarl, Earryl, Sstorl, Ememl, Bpntrl, Itempl, Clinel
 .endif
 
 ; put the IRQ and MNI code in RAM so that it can be changed

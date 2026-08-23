@@ -147,18 +147,197 @@ The `LCDINIT` routine runs from `RES_vec` at reset, before the `[C]old/[W]arm` p
 
 </details>
 
+## Inline Assembler
+
+The ROM carries a two pass 6502/65C02 assembler. Assembly source lives inside the BASIC program as ordinary numbered lines, between `ASM` and `ENDASM`:
+
+```
+100 ASM
+110 START LDA MSG,X
+120       BEQ DONE
+130       JSR $FFD2
+140       INX
+150       BNE START
+160 DONE  RTS
+170 MSG   TEXT "HELLO"
+180       BYTE 0
+190 ENDASM
+200 CALL SYM("START")
+```
+
+Those lines are real BASIC lines. They `LIST`, they `SAVE` and `LOAD` with the program, and you edit them with the same line numbers as everything else.
+
+### The Keywords
+
+| Command | Argument | What it does |
+| --- | --- | --- |
+| `ASM` | — | opens a block. Assembles the program if the image is stale, then steps over the block |
+| `ENDASM` | — | closes a block. Never executed |
+| `ASSEMBLE [n]` | byte | assemble the whole program now. A non zero `n` prints a listing |
+| `SYM("NAME")` | string | the address a label was given |
+| `DASM start[,count]` | address, byte | disassemble `count` instructions, 20 by default |
+
+<details>
+<summary>
+Inline Assembler Details
+</summary>
+
+## Inline Assembler Details
+
+### Writing a Line
+
+One instruction per line:
+
+```
+[label] [mnemonic | directive [operand]] [; comment]
+```
+
+**A label is any first field that is not a mnemonic or a directive.** It cannot be told by indentation, because EhBASIC throws away the spaces between a line number and the first character before it ever stores the line — type `120       BEQ DONE` and `LIST` gives you back `120 BEQ DONE`. A trailing `:` on a label is accepted and ignored. Lower case is folded up, so `lda #$41` is fine, but text inside quotes is left exactly as typed.
+
+Operands take literals, labels, one `+` or `-` offset, and a leading `<` or `>` for the low or high byte:
+
+| Written | Means |
+| --- | --- |
+| `$1F` `$1234` | hex |
+| `%10101010` | binary |
+| `65` | decimal |
+| `'A'` | one character |
+| `LABEL` `LABEL+2` | a label, with an optional offset |
+| `*` | the address of the instruction being assembled |
+| `<LABEL` `>LABEL` | its low or high byte |
+
+There is no precedence and no arithmetic beyond that single offset. This is not the BASIC expression evaluator and does not pretend to be — `LDA #VAL*2` is a syntax error, not a multiplication.
+
+### Zero Page Needs `<`
+
+**A symbolic operand always assembles as absolute unless you write `<` in front of it.** `LDA PTR` is three bytes even when `PTR` is `$80`; `LDA <PTR` is the two byte zero page form.
+
+That is not an oversight. The width of an instruction has to be the same in both passes, or every address after it shifts between them and the whole image is wrong. A forward reference has no value yet in pass 1, so the only rule that can be honest is to decide the width from **how the operand is written** rather than from what it turns out to be worth. Literals narrow on their own — `LDA $80` is zero page, `LDA $0080` is absolute, exactly as written — and for a symbol `<` is how you say so. The two meanings coincide: for something that lives in zero page, its low byte *is* its address.
+
+The modes that only exist in zero page — `($nn,X)`, `($nn),Y`, `($nn)`, and the `BBR`/`BBS` operand — have no absolute form to fall back on, so they take the low byte and complain if the value will not fit.
+
+### Directives
+
+| Directive | Does |
+| --- | --- |
+| `BYTE n[,n...]` | emit bytes |
+| `WORD n[,n...]` | emit 16 bit words, low byte first |
+| `TEXT "..."` | emit the characters between the quotes, exactly as typed |
+| `NAME EQU n` | give a name a value without emitting anything |
+| `DS n` | reserve `n` bytes, emitting nothing |
+| `ORG n` / `*=n` | assemble at a fixed address from here on |
+
+`ORG` is a one way door. Everything after it is assembled at real addresses, is **not** counted in the protected image, and is **not** protected from BASIC — it is the plain `POKE` contract, for when you want code at a specific place and will keep it clear yourself. Labels defined after an `ORG` are absolute.
+
+### Where the Code Goes
+
+With no `ORG`, you do not choose. Pass 1 measures the image, and the assembler then takes exactly that much off the top of RAM and lowers EhBASIC's memory ceiling to match, so string space and arrays can never grow into it:
+
+```
+                +--------------------+  end of memory as cold start found it
+                |   work buffer      |  80 bytes
+                +--------------------+
+                |   symbol table     |  12 bytes a symbol, growing down
+                +--------------------+
+                |   code image       |  growing up
+   Ememl  --->  +--------------------+  the ceiling, lowered to here
+                |   string space     |  grows down from the ceiling as usual
+```
+
+`FRE(0)` drops by the whole reservation, and `SYM("NAME")` is how you find anything inside it. All the `ASM` blocks in a program are assembled in line order into **one** image with **one** symbol table, so a label defined in the first block is visible in the last.
+
+Names are significant to eight characters. Twelve bytes an entry means 64 symbols costs 768 bytes.
+
+### Assembling, and When Variables Get Cleared
+
+`ASSEMBLE` does the whole program at once and reports where the code landed. `ASSEMBLE 1` adds a listing:
+
+```
+Ready
+ASSEMBLE 1
+3F9E  A9 41         START LDA #$41
+3FA0  20 D2 FF      JSR $FFD2
+3FA3  60            RTS
+
+CODE AT $3F9E, 6
+```
+
+If you never run it, reaching an `ASM` block does the same thing on the spot, and from then on the block is simply stepped over.
+
+**Lazy assembly clears variables if any string space is in use**, and says so:
+
+```
+*** ASSEMBLED, VARIABLES CLEARED
+```
+
+Taking memory off the top means moving the floor of string space, and strings already allocated cannot be picked up and put down somewhere else — so they have to go. Numeric variables, arrays and the running program are untouched, and if no string has been built yet nothing is cleared at all and no notice appears. Note that `A$="HELLO"` does **not** allocate: EhBASIC points the descriptor straight at the program text. It is computed strings that cost space.
+
+Run `ASSEMBLE` from the immediate prompt, or make it the first line of the program, and the question never arises.
+
+The image goes stale on any program line being entered or deleted, on `NEW`, and on `CLEAR`. A plain `RUN` does not invalidate it, so `ASSEMBLE` once and then `RUN` as often as you like.
+
+</details>
+
+### The Disassembler
+
+`DASM` decodes the same instruction set the assembler emits, from anywhere in memory — including the ROM:
+
+```
+Ready
+DASM $FE00,4
+FE00  D8         CLD
+FE01  58         CLI
+FE02  80 0B      BRA $FE0F
+FE04  C9 08      CMP #$08
+```
+
+Combined with `SYM` it is the quick way to check what a block actually produced: `DASM SYM("START"),8`.
+
+### Errors
+
+Assembly stops at the first fault and names the BASIC line, using EhBASIC's own error machinery — the assembler walks the program itself rather than executing it, so it sets the current line from the header before raising:
+
+```
+Ready
+ASSEMBLE 0
+
+Assembly syntax Error in line 110
+Ready
+```
+
+| Error | Means |
+| --- | --- |
+| `Assembly syntax` | not a mnemonic or directive, a malformed operand, or no such addressing mode for that instruction |
+| `Undefined label` | a label used but never defined; also `SYM()` on a name that is not there |
+| `Duplicate label` | defined twice |
+| `Branch out of range` | more than `-128`/`+127` away |
+| `ASM block` | `ASM` with no `ENDASM`, or an `ENDASM` on its own |
+| `Function call` | a value too big for the slot, such as `LDA #$1234` |
+| `Out of memory` | the image and symbol table would collide with the arrays |
+
+### How the Source Survives Tokenizing
+
+Worth knowing, because it looks impossible at first. `BEQ DONE` is stored as `BEQ` followed by the **`DO` token** and `NE` — the tokenizer matches keywords at every character position, so `DONE`, `TOTAL`, `ROR`, `AND`, `INC` and plenty of others get chewed on the way in.
+
+That turns out not to matter. The crunch has to be lossless, because `LIST` must be able to put a line back exactly as it was typed, so the assembler simply expands each line through `LAB_KEYT` — the same table `LIST` uses — before parsing it. The tokenizer is not modified at all, which means it does not matter what order you type or edit the lines in, `LIST` is correct for free, and lower case works because the tokenizer never matched it in the first place.
+
 ## Build Options
 
-There are two classes of build options currently:
+There are three classes of build options currently:
 
-- **Debug Options** - Disabled by Default 
+- **Debug Options** - Disabled by Default
 - **LCD Commands** - Enabled by Default
+- **Inline Assembler** - Enabled by Default
 
 None of the debug machinery below is in the ROM unless you build for it. A plain `make` produces the stock image with no trace of it — no code, no cost, and the `POKE` address is inert.
 
 ```
-make                      the stock ROM, LCD extensions in
+make                      the stock ROM, LCD extensions and assembler in
 make LCD=0                leave the HD44780 LCD extensions out entirely
+make ASM=0                leave the inline assembler, SYM() and DASM out
+make ASMCPU=n             which instruction set the assembler covers.
+                          0 = NMOS 6502, 1 = 65C02 core, 2 = full WDC
+                          W65C02S (the default)
 make SENTINEL=n           build the program chain sentinel in, armed at n
                           headers per statement on reset. n=0 builds it in but
                           leaves it disarmed
@@ -169,6 +348,10 @@ make SENTINEL=1 DEBUG=1   both
 
 `LCD` defaults to **1**, so the LCD commands are in the stock ROM. `make LCD=0` takes out the driver, the thirteen keywords, their table entries in `basic.s` and the `LCDINIT` call at reset — the result is byte for byte the ROM you would have got before any of it was written. Build that way if your board has
 no LCD on VIA port B, and see [LCD Commands](#lcd-commands) for why it matters.
+
+`ASM` defaults to **1** as well. `make ASM=0` takes out the assembler, the disassembler, the opcode tables, all five keywords and their table entries, and the three flag clears in `basic.s` — and, like `LCD=0`, gives back a ROM byte for byte identical to the one before any of it existed. It costs about 4KB of ROM and nothing at all at run time until you use it, so there is little reason to turn it off unless you need the space.
+
+`ASMCPU` picks how much of the instruction set the assembler and `DASM` know about. It defaults to **2**, the full WDC W65C02S, because that is the part a board built today will have. A Rockwell R65C02 has `RMB`/`SMB`/`BBR`/`BBS` but not `WAI` or `STP`, and a GTE/CMD G65SC02 has none of them — build those with `make ASMCPU=1`. Nothing in the ROM can tell what the silicon actually is, so the flag is the only guard: at the default, the assembler will cheerfully emit an instruction your CPU cannot execute. It does not change the ROM size either way, the tables are a fixed 256 bytes; a lower setting only blanks the entries above the level you pick, so they fail as `Assembly syntax` rather than assembling.
 
 <details>
  
@@ -342,7 +525,7 @@ Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` fo
 | Range | Contents |
 | --- | --- |
 | `$8000-$800B` | entry jump table |
-| `$800C-$AC29` | EhBASIC, the minimal monitor, the LCD driver and the custom commands |
+| `$800C-$BBF9` | EhBASIC, the minimal monitor, the LCD driver, the custom commands and the inline assembler |
 | `$FC00-$FCFA` | bus stress test, pinned high on purpose |
 | `$FE00-$FEFA` | WozMon |
 | `$FFFA-$FFFF` | NMI, RESET and IRQ vectors |
@@ -351,12 +534,20 @@ Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` fo
 | `$0300-$03FF` | serial receive ring buffer, page aligned |
 | `$E2-$E3`, `$E8-$ED` | chain sentinel / byte watch / bus test scratch |
 | `$EE` | byte watch switch |
+| `$2C-$58` | inline assembler working storage, out of EhBASIC's unused `$13-$5A` |
+| top of RAM | the assembler's code image, symbol table and line buffer, below a lowered `Ememl` |
+
+`$13-$23` is left entirely free. With `make ASM=0` the `$2C-$58` block is free as well, and the top of RAM is not touched.
 
 WozMon lives at `$FE00` rather than its native `$FF00` because the vectors at `$FFFA` leave only 250 bytes there, and this version is slightly larger. It shares `CHRIN` and `CHROUT` with the rest of the ROM instead of carrying its own copy of the 65C51 transmit bug workaround, so it gets the same interrupt driven input, flow control and visual backspace as BASIC does.
 
 ### Adding Your Own Commands
 
 `MONITOR` is a *real* EhBASIC keyword, not a `CALL`. Adding another follows the same four table edits in `basic.s` — a `TK_` equate, a `LAB_CTBL` vector, a keyword table entry under its first letter, and a `LAB_KEYT` entry for `LIST` to detokenize it — with the command body itself in `custom_commands.s`. The thirteen `LCD*` keywords are the same four edits done thirteen times.
+
+Two things to know before you add one. `LAB_KEYT` is a **dense** array indexed `(token-$80)*4`, so a new entry has to go in at exactly the right ordinal or `LIST` prints garbage from that token on. And within a letter's dictionary table a longer keyword sharing a prefix must come **first** — `ENDASM` sits above `END` for the same reason `DOKE` sits above `DO`, or it would crunch as `END` followed by `ASM`.
+
+There are **seven** token values left. The tokens run `$80` to `$F8`; a function keyword also needs `LAB_FTPL` and `LAB_FTBL` entries, and only tokens below `TK_TAB` can start a statement.
 
 ## Origins & EhBASIC
 
