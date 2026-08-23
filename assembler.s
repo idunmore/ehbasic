@@ -92,6 +92,17 @@ Clineh       = Clinel+1
 
 ; error codes, matching the LAB_BAER table in basic.s
 
+; An optional prefix, allowed as the first non space character of a line
+; inside a block, whose only job is to stop EhBASIC eating the indentation
+; after it. LAB_GFPN leaves the execute pointer past any spaces following the
+; line number, so "110       LDA #$00" is stored, and LISTs, with the spaces
+; gone. Anything non blank at that position stops the skipping, and this is a
+; character with no meaning anywhere else: the tokenizer copies it straight
+; through, it costs no token, and outside a block it is a syntax error, which
+; is what a stray one should be.
+
+ASM_INDENT   = '|'
+
 ERRNUM_ASM   = $24            ; "Assembly syntax"
 ERRNUM_UL    = $26            ; "Undefined label"
 ERRNUM_DL    = $28            ; "Duplicate label"
@@ -840,7 +851,10 @@ asm_ident_no
 ;
 ; The grammar is
 ;
-;     [label] [mnemonic | directive [operand]] [; comment]
+;     [|] [label] [mnemonic | directive [operand]] [; comment]
+;
+; where the leading "|" is optional and exists only to protect indentation,
+; see ASM_INDENT above.
 ;
 ; with no way to tell a label from a mnemonic by position, because EhBASIC
 ; throws away the spaces between a line number and the first character (see
@@ -854,6 +868,15 @@ ASM_LINE
       JSR   ASM_SKIPSP
       BCS   asm_line_done     ; blank line, or only a comment
 
+      CMP   #ASM_INDENT       ; step over the indent prefix if there is one.
+      BNE   asm_line_pfx      ; a label can follow it as happily as an
+                              ; instruction can, so "|LOOP LDA X" lines a
+                              ; label up on the same margin as the code
+      INC   ASM_BUF
+      JSR   ASM_SKIPSP
+      BCS   asm_line_done     ; nothing after it but spaces or a comment
+
+asm_line_pfx
       CMP   #'*'              ; "*=" is ORG written the other way
       BNE   asm_line_field
 

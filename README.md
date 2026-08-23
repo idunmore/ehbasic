@@ -189,10 +189,33 @@ Inline Assembler Details
 One instruction per line:
 
 ```
-[label] [mnemonic | directive [operand]] [; comment]
+[|] [label] [mnemonic | directive [operand]] [; comment]
 ```
 
-**A label is any first field that is not a mnemonic or a directive.** It cannot be told by indentation, because EhBASIC throws away the spaces between a line number and the first character before it ever stores the line — type `120       BEQ DONE` and `LIST` gives you back `120 BEQ DONE`. A trailing `:` on a label is accepted and ignored. Lower case is folded up, so `lda #$41` is fine, but text inside quotes is left exactly as typed.
+**A label is any first field that is not a mnemonic or a directive.** A trailing `:` on a label is accepted and ignored. Lower case is folded up, so `lda #$41` is fine, but text inside quotes is left exactly as typed.
+
+### Indenting with `|`
+
+EhBASIC throws away the spaces between a line number and the first character before it ever stores the line, so `120       BEQ DONE` comes back from `LIST` as `120 BEQ DONE`. Anything non-blank at that position stops the skipping, and that is what the optional `|` prefix is for:
+
+```
+100 ASM
+110 |        LDX #$00
+120 |LOOP    LDA MSG,X
+130 |        BEQ DONE
+140 |        JSR COUT
+150 |        INX
+160 |        BNE LOOP
+170 |DONE    RTS
+180 |MSG     TEXT "HELLO"
+190 ENDASM
+```
+
+That is exactly what `LIST` gives back, and it assembles byte for byte identically to the same source without the prefixes — the assembler steps over the `|` and carries on. It is purely cosmetic and entirely optional.
+
+A label can share the margin, as `|LOOP` and `|DONE` do above, so labels and code line up on the same column. A line that is nothing but `|`, or `|` followed by a comment, is simply blank.
+
+`|` was picked because it has no meaning anywhere else: the tokenizer copies it straight through so it costs no token, no 6502 assembler uses it, and outside an `ASM` block it is a syntax error — which is what a stray one should be. It only has any effect as the first non-space character of a line inside a block.
 
 Operands take literals, labels, one `+` or `-` offset, and a leading `<` or `>` for the low or high byte:
 
