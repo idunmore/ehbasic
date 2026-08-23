@@ -102,8 +102,10 @@ Thirteen keywords are provided. They are *real* EhBASIC keywords, not `CALL`s, s
 <details>
 
 <summary>
-### LCD Command/Keyword Details
+LCD Command/Keyword Details
 </summary>
+
+### LCD Command/Keyword Details
 
 `LCDPRINT` takes a full `PRINT` style list, so `LCDPRINT "N=";N` works. `;` and `,` are both plain separators — there are no tab stops to move to on a 16 or 20 column display. There is no newline: the display has no scroll, so where the next character goes is `LCDCURPOS`'s business. Numbers are formatted exactly as `PRINT` formats them, which **includes** the *leading space* `PRINT` puts in front of a positive value (important when you are counting columns on a 16 wide display).
 
