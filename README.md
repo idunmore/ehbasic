@@ -221,7 +221,7 @@ It is only necessary to use `|` to indent if it would otherwise mean that only w
 
 ```
 100 ASM
-110 |        LDX#$00  
+110 |        LDX #$00  
 120 LOOP     LDA MSG,X
 130 |        BEQ DONE
 140 |        JSR COUT
