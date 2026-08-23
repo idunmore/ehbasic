@@ -217,6 +217,23 @@ A label can share the margin, as `|LOOP` and `|DONE` do above, so labels and cod
 
 `|` was picked because it has no meaning anywhere else: the tokenizer copies it straight through so it costs no token, no 6502 assembler uses it, and outside an `ASM` block it is a syntax error — which is what a stray one should be. It only has any effect as the first non-space character of a line inside a block.
 
+It is only necessary to use `|` to indent if it would otherwise mean that only whitespace characters would precede an opcode/instruction:
+
+```
+100 ASM
+110 |        LDX#$00  
+120 LOOP     LDA MSG,X
+130 |        BEQ DONE
+140 |        JSR COUT
+150 |        INX
+160 |        BNE LOOP
+170 DONE     RTS
+```
+
+The above are all valid combinations; you can use `|` on every line for consistency, or just where it is necessary to preserve indentation.
+
+### Operands
+
 Operands take literals, labels, one `+` or `-` offset, and a leading `<` or `>` for the low or high byte:
 
 | Written | Means |
