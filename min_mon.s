@@ -15,11 +15,64 @@
 
       .export CHRIN, CHROUT
 
+; exported only so that its address shows up in the link map. where the stress
+; loop lands in the ROM turns out to matter, see BUSTEST below
+
+.ifdef DEBUG_TOOLS
+      .export BUSTEST
+.endif
+
 ; set by the interrupt handler when a [CTRL-C] comes in, tested by CCHECK
 ; below. it has to be equated ahead of the include so that basic.s assembles
 ; its one reference to it as zero page
 
 BRK_FLAG     = $E7            ; [CTRL-C] seen by the interrupt handler
+
+; build time options, set from the Makefile
+;
+;   SENTINEL_INIT  define to build the program chain sentinel in. the value is
+;                  what $EC holds after reset, so 1 arms it at one header per
+;                  statement and 0 leaves it disarmed until a POKE 236,n
+;   DEBUG_TOOLS    define to build the block watch, the 8009R bus stress test
+;                  and the page zero dump in
+;
+; neither is defined by a plain "make", so the stock ROM carries none of it
+
+.ifdef SENTINEL_INIT
+SENT_BUILT   = 1
+.else
+SENT_BUILT   = 0
+SENTINEL_INIT = 0
+.endif
+
+.ifdef DEBUG_TOOLS
+DIAG_BUILT   = 1
+.else
+DIAG_BUILT   = 0
+.endif
+
+TOOLS_BUILT  = SENT_BUILT + DIAG_BUILT
+
+; the program chain sentinel's working storage, up here for the same reason
+
+CHK_SVR      = $E2            ; start of variables when the walk was anchored
+CHK_PTR      = $E8            ; header being checked, low/high
+CHK_NUM      = $EA            ; line number of the header before it, low/high
+CHK_N        = $EC            ; headers checked per call, $00 = sentinel off
+CHK_CNT      = $ED            ; headers left to do in this call
+
+; the byte watch's working storage. it deliberately shares the chain
+; sentinel's bytes, only one of the two runs at a time
+
+WCH_PTR      = $E8            ; base address of the block being watched
+WCH_IDX      = $EA            ; how far the round robin has got through it
+WCH_SAV      = $ED            ; the caller's Y, held over the check
+WCH_ON       = $EE            ; $00 = off, $01 = arm, b7 set once copied
+
+WCH_COPY     = $0280          ; the copy of the block, in WozMon's line buffer,
+                              ; which is free unless WozMon is actually running
+WCH_LEN      = $80            ; bytes watched. must be a power of two
+WCH_STEP     = 4              ; bytes checked per statement
 
       .include "basic.s"
 
@@ -42,6 +95,13 @@ NMI_vec     = IRQ_vec+$0A     ; NMI code vector
       JMP   LAB_COLD          ; $8003 force a cold start
       JMP   LAB_WARM          ; $8006 force a warm start, no prompt. resumes
                               ;       the BASIC program that is in memory
+.if DIAG_BUILT
+      JMP   BUSTEST           ; $8009 RAM bus stress test, see BUSTEST below
+.else
+      JMP   RES_vec           ; $8009 no bus stress test in this build. the slot
+                              ;       stays so the three above it never move,
+                              ;       and lands somewhere harmless
+.endif
 
       .segment "CODE"         ; pretend this is in a 1/8K ROM
 
@@ -52,6 +112,14 @@ RES_vec
       LDX   #$FF              ; empty stack
       TXS                     ; set the stack
       JSR   ACIAsetup         ; init ring buffer and ACIA (receiver IRQ enabled)
+.if SENT_BUILT
+      LDA   #SENTINEL_INIT    ; the chain sentinel's setting at reset, fixed
+      STA   CHK_N             ; .. at build time. POKE 236,n overrides it
+      STZ   CHK_PTR+1         ; walk pointer parked so the first call starts it
+.endif
+.if DIAG_BUILT
+      STZ   WCH_ON            ; block watch off
+.endif
 
 ; set up vectors and interrupt code, copy them to page 2
 
@@ -260,6 +328,11 @@ CHROUT
 ; falls through to EhBASIC's own ON IRQ/ON NMI checks, exactly as CTRLC does
 
 CCHECK
+.if TOOLS_BUILT
+      JSR   SENTINEL          ; costs a load and a branch unless something is
+                              ; actually switched on
+.endif
+
       LDA   ccflag            ; get [CTRL-C] check flag
       BNE   @nobreak          ; exit if inhibited
 
@@ -272,6 +345,597 @@ CCHECK
 
 @nobreak:
       JMP   LAB_FBA2          ; go do the interrupt checks and return
+
+; ---------------------------------------------------------------------------
+.if TOOLS_BUILT
+; ---------------------------------------------------------------------------
+; program chain sentinel
+;
+; a debug aid for the "a line goes missing part way through a long RUN" bug.
+; every instance of it so far has been a single byte written into a line
+; header, the high byte of the line number, which throws that line out of
+; order and hides it, and everything after it, from LIST <n>. it has never
+; been reproduced under emulation, so this is here to catch it on the board
+;
+; it is called from CCHECK, which EhBASIC reaches between statements and
+; between LISTed lines. each call walks a few line headers, picking up where
+; the last call left off, and checks that every line number is greater than
+; the one before it and that every link still points inside the program. when
+; one is not it reports and breaks to Ready with the program untouched, so it
+; can be LISTed or dumped from the MONITOR
+;
+; it is off until it is switched on, and the count is also the switch:
+;
+;     POKE 236,16      check 16 headers per statement, a fair starting point
+;     POKE 236,0       off again
+;
+; a bigger count catches the damage closer to the statement that did it and
+; runs slower. a whole sweep of a 500 line program takes 500/CHK_N statements,
+; and the "Break in line" it reports is the line that was executing when the
+; damage was noticed, not necessarily the one that caused it, so keep the
+; count high enough that the two are close
+;
+; Y is restored because LIST calls the [CTRL-C] check with its line index in
+; it. A and X are not, the stock CTRLC does not preserve them either
+
+SENTINEL
+
+.if DIAG_BUILT
+
+; the block watch runs first and, when it is armed, instead of the chain walk.
+; the two share zero page. it takes a copy of WCH_LEN bytes when it is armed
+; and then compares a few of them per statement, round robin, so that it stays
+; cheap enough to leave running without changing what the machine does
+;
+; it watches a block rather than a byte because the fault this is looking for
+; lands wherever the stack pointer happens to be. a watch on one address misses
+; a hit on the byte next to it, which is exactly what happened once
+
+      LDA   WCH_ON            ; is the block watch armed?
+      BEQ   @chain            ; no, try the chain sentinel
+
+      STY   WCH_SAV           ; LIST calls this with its line index in Y
+      BIT   WCH_ON            ; b7 set once the copy has been taken
+      BMI   @compare
+
+      LDY   #WCH_LEN-1        ; first look, so take the copy
+@latch:
+      LDA   (WCH_PTR),Y
+      STA   WCH_COPY,Y
+      DEY
+      BPL   @latch
+
+      STZ   WCH_IDX
+      LDA   #$80
+      TSB   WCH_ON            ; and note that it has been taken
+      LDY   WCH_SAV
+      RTS
+
+@compare:
+      LDY   WCH_IDX           ; pick up where the last statement left off
+      LDA   (WCH_PTR),Y
+      CMP   WCH_COPY,Y
+      BNE   @wfail
+      INY
+      LDA   (WCH_PTR),Y
+      CMP   WCH_COPY,Y
+      BNE   @wfail
+      INY
+      LDA   (WCH_PTR),Y
+      CMP   WCH_COPY,Y
+      BNE   @wfail
+      INY
+      LDA   (WCH_PTR),Y
+      CMP   WCH_COPY,Y
+      BNE   @wfail
+      INY
+      TYA
+      AND   #WCH_LEN-1        ; wrap the round robin
+      STA   WCH_IDX
+      LDY   WCH_SAV
+      RTS
+
+@wfail:
+      JMP   @wbad             ; the report is out of branch range from here
+
+.endif                        ; DIAG_BUILT
+
+@chain:
+.if SENT_BUILT
+      LDA   CHK_N             ; is the chain sentinel switched on?
+      BEQ   @done             ; no, nothing to do
+
+      STA   CHK_CNT           ; headers to walk this time round
+
+; editing the program moves the start of the variables, and it moves every
+; line header after the edit with it, so a walk pointer from before the edit
+; points at nothing in particular. spot the move and start a fresh sweep
+; rather than report a line that is not there any more
+
+      LDA   Svarl             ; has the program been edited under us?
+      CMP   CHK_SVR
+      BNE   @anchor
+
+      LDA   Svarh
+      CMP   CHK_SVR+1
+      BEQ   @start            ; no, carry on where the last call left off
+
+@anchor:
+      LDA   Svarl             ; re-anchor and abandon the sweep in progress
+      STA   CHK_SVR
+      LDA   Svarh
+      STA   CHK_SVR+1
+      STZ   CHK_PTR+1         ; parked, the walk below starts it again
+
+@start:
+      PHY                     ; LIST needs its index back
+
+@line:
+      LDA   CHK_PTR+1         ; a parked pointer means start a fresh sweep
+      BNE   @have
+
+      JSR   @rewind
+@have:
+      LDY   #$01
+      LDA   (CHK_PTR),Y       ; get link high byte
+      BNE   @link             ; not the end of program marker
+
+      JSR   @rewind           ; that was the marker, back to the first line
+      BRA   @next
+
+; the link has to stay below the variables, or the walk is being led out of
+; the program by a header that is already damaged
+
+; the report is out of branch range from here, so failures go through this
+
+@toobad:
+      JMP   @bad
+
+@link:
+      CMP   Svarh             ; compare link high byte with start of variables
+      BCC   @order            ; clearly below, take it
+
+      BNE   @toobad           ; clearly above, the link is damaged
+
+      DEY                     ; same page, so compare the low bytes
+      LDA   (CHK_PTR),Y
+      CMP   Svarl
+      BCS   @toobad           ; at or above the variables, damaged
+
+; line numbers only ever increase along the chain
+
+@order:
+      LDY   #$03
+      LDA   (CHK_PTR),Y       ; get this line number high byte
+      CMP   CHK_NUM+1         ; compare with the previous line number
+      BCC   @toobad           ; less, so out of order
+
+      BNE   @keep             ; greater, so in order
+
+      DEY                     ; high bytes matched, compare the low bytes
+      LDA   (CHK_PTR),Y
+      CMP   CHK_NUM
+      BCC   @toobad           ; less, out of order
+
+      BEQ   @toobad           ; equal, two lines cannot share a number
+
+@keep:
+      LDY   #$02              ; carry this line number into the next check
+      LDA   (CHK_PTR),Y
+      STA   CHK_NUM
+      INY
+      LDA   (CHK_PTR),Y
+      STA   CHK_NUM+1
+
+      LDY   #$00              ; and step the walk on to the next line
+      LDA   (CHK_PTR),Y       ; get link low byte
+      TAX
+      INY
+      LDA   (CHK_PTR),Y       ; get link high byte
+      STX   CHK_PTR
+      STA   CHK_PTR+1
+@next:
+      DEC   CHK_CNT           ; done enough for this statement?
+      BNE   @line             ; no, do another header
+
+      PLY                     ; give LIST its index back
+.endif                        ; SENT_BUILT
+@done:
+      RTS
+
+; start a sweep at the first line of the program, with a line number of zero
+; behind it so that the first header always compares as in order
+
+.if SENT_BUILT
+@rewind:
+      LDA   Smeml
+      STA   CHK_PTR
+      LDA   Smemh
+      STA   CHK_PTR+1
+      STZ   CHK_NUM
+      STZ   CHK_NUM+1
+      RTS
+
+.endif                        ; SENT_BUILT
+
+; take a copy of the zero page before anything else runs. by the time a human
+; can type a MONITOR command the interpreter has taken a branch, and a branch
+; reparks Baslnl ($AA/$AB) onto the damaged line all by itself, so a dump made
+; by hand cannot tell the pointer that did the damage from the pointer the
+; damage created. this one is made at the instant it is spotted
+;
+; the ring buffer page is the only 256 byte scratch there is. its contents do
+; not matter now, and the caller empties the buffer so that the copy is not
+; read back as type ahead
+
+@snapzp:
+      LDX   #$00
+@snap:
+      LDA   $00,X
+      STA   INPUT_BUFFER,X
+      INX
+      BNE   @snap
+
+      RTS
+
+.if DIAG_BUILT
+
+; the block watch fired. the stack holds only the return into CCHECK, because
+; the watch runs before the chain walk saves anything
+
+@wbad:
+      JSR   @snapzp           ; freeze the zero page first
+
+      PLA                     ; drop the return into CCHECK, the break below
+      PLA                     ; leaves through LAB_1636 like [CTRL-C] does
+
+      STZ   WCH_ON            ; one report is enough, disarm the watch
+      LDA   READ_PTR          ; the ring buffer holds the copy now, so empty it
+      STA   WRITE_PTR
+
+      LDX   #$00              ; X, not Y - Y is the index of the byte that
+@wmsg:                        ; changed and the report below needs it
+      LDA   WCH_TXT,X
+      BEQ   @wwhere
+      JSR   CHROUT
+      INX
+      BNE   @wmsg             ; loop, branch always
+
+@wwhere:
+      TYA                     ; the address that changed is base + index
+      CLC
+      ADC   WCH_PTR
+      TAX
+      LDA   WCH_PTR+1
+      ADC   #$00
+      JSR   PRHEX
+      TXA
+      JSR   PRHEX
+      JSR   SPACE
+      LDA   WCH_COPY,Y        ; what it held when the watch was armed
+      JSR   PRHEX
+      JSR   SPACE
+      LDA   (WCH_PTR),Y       ; and what is in it now
+      JSR   PRHEX
+      JMP   @dump
+
+.endif                        ; DIAG_BUILT
+
+.if SENT_BUILT
+
+; the chain sentinel fired. the extra pull drops the index LIST left in Y
+
+@bad:
+      JSR   @snapzp           ; freeze the zero page first
+
+      PLY                     ; drop the saved LIST index
+      PLA                     ; and the return into CCHECK
+      PLA
+
+      STZ   CHK_N             ; one report is enough, switch the sentinel off
+      LDA   READ_PTR          ; the ring buffer holds the copy now, so empty it
+      STA   WRITE_PTR
+
+      LDY   #$00
+@msg:
+      LDA   CHK_TXT,Y
+      BEQ   @where
+      JSR   CHROUT
+      INY
+      BNE   @msg              ; loop, branch always
+
+@where:
+      LDA   CHK_PTR+1         ; address of the header that failed
+      JSR   PRHEX
+      LDA   CHK_PTR
+      JSR   PRHEX
+      JSR   SPACE
+      LDY   #$03              ; the line number that is out of order
+      LDA   (CHK_PTR),Y
+      JSR   PRHEX
+      DEY
+      LDA   (CHK_PTR),Y
+      JSR   PRHEX
+      JSR   SPACE
+      LDA   CHK_NUM+1         ; and the line number before it
+      JSR   PRHEX
+      LDA   CHK_NUM
+      JSR   PRHEX
+
+.endif                        ; SENT_BUILT
+
+; now the zero page as it was, in the shape the MONITOR dumps it
+
+@dump:
+      LDX   #$00
+@zp:
+      TXA
+      AND   #$07              ; eight bytes to a line
+      BNE   @byte
+
+      JSR   CRLF
+      LDA   #$00              ; the copy is always of page zero
+      JSR   PRHEX
+      TXA
+      JSR   PRHEX
+      LDA   #':'
+      JSR   CHROUT
+@byte:
+      JSR   SPACE
+      LDA   INPUT_BUFFER,X
+      JSR   PRHEX
+      INX
+      BNE   @zp               ; loop, branch always
+
+      LDA   #$03              ; [CTRL-C], so LAB_1636 prints "Break in line"
+      JMP   LAB_1636          ; .. naming the line that was executing
+
+.if SENT_BUILT
+CHK_TXT
+      .byte $0D,$0A,"*** CHAIN ",$00
+.endif
+
+.if DIAG_BUILT
+WCH_TXT
+      .byte $0D,$0A,"*** WATCH ",$00
+.endif
+
+CRLF
+      LDA   #$0D
+      JSR   CHROUT
+      LDA   #$0A
+      JMP   CHROUT
+
+SPACE
+      LDA   #' '
+      JMP   CHROUT
+
+; print A as two hex digits
+
+PRHEX
+      PHA                     ; save the byte
+      LSR                     ; high nibble first
+      LSR
+      LSR
+      LSR
+      JSR   @digit
+      PLA
+@digit:
+      AND   #$0F              ; mask off one nibble
+      CMP   #$0A              ; is it A to F?
+      BCC   @out              ; no, "0" to "9" is just an add
+
+      ADC   #$06              ; carry is set, so this adds 7 in total
+@out:
+      ADC   #'0'
+      JMP   CHROUT
+
+; ---------------------------------------------------------------------------
+.if DIAG_BUILT
+; ---------------------------------------------------------------------------
+; RAM bus stress test
+;
+; run it from WozMon with 8009R
+;
+; the line corruption this ROM's byte watch caught is a stray write: the data
+; and the instruction were right, the address was not. both addresses it ever
+; damaged are one address bit away from the only two regions of low RAM that
+; anything writes often - $05EC is $01EC with A10 set, which is the stack, and
+; $0B5F is $035F with A11 set, which is the serial receive buffer
+;
+; so this hammers those two pages and holds the whole of the rest of RAM as a
+; guard, filled with a pattern computed from the address. anything that turns
+; up in the guard arrived there by mistake
+;
+;     BUS TEST - ADDR WAS GOT PASS - RESET TO STOP
+;     ...........
+;     *** BUS 05EC EC 31 0042
+;     ....
+;
+; the address is the whole story. exclusive-or it with $0400 and with $0800 and
+; see which one lands in page one or page three - that is the address bit that
+; let go. it puts the byte back and carries on, so one run collects the whole
+; pattern rather than the first instance
+;
+; interrupts are off throughout, so nothing else can write to RAM and there is
+; no way to type at it. reset the board to stop it, and take the [C]old start
+; afterwards - this leaves the whole of RAM full of the guard pattern
+;
+; assumes the stock BE6502 memory map, 16K of RAM at $0000-$3FFF
+;
+; WHERE THIS CODE LIVES MATTERS. the fault it looks for is an address bit that
+; was high for the instruction fetch failing to fall for the write that follows
+; it, so a stress loop can only exercise the bits that are actually high at its
+; own address. the first version of this sat at $AA93, where A10 is already low
+; - the very bit that was slipping - and ran clean for thousands of passes
+; while a BASIC program tripped over it in minutes. basic.cfg now pins it at
+; $FC00, where A9 to A15 are all set, so every one of them has to fall on the
+; way into page one
+
+      .segment "BUSTST"       ; pinned at $FC00, see below and basic.cfg
+
+GUARD_LO     = $02            ; first page held as guard
+GUARD_HI     = $40            ; one past the last page held as guard
+RING_PAGE    = $03            ; the serial buffer page, stressed rather than guarded
+
+BUS_PTR      = $E8            ; guard walk pointer, low/high
+BUS_CNT      = $EA            ; pass counter, low/high
+
+BUSTEST
+      SEI                     ; nothing else may write to RAM while this runs
+      CLD
+      LDX   #$FF              ; the test owns the stack
+      TXS
+
+      STZ   BUS_CNT
+      STZ   BUS_CNT+1
+
+      LDY   #$00
+@banner:
+      LDA   BUS_TXT,Y
+      BEQ   @fill
+      JSR   CHROUT
+      INY
+      BNE   @banner           ; loop, branch always
+
+; fill the guard with a pattern computed from the address, so that a byte which
+; has changed can be told apart from one that was never right
+
+@fill:
+      STZ   BUS_PTR
+      LDA   #GUARD_LO
+      STA   BUS_PTR+1
+@fillpage:
+      LDA   BUS_PTR+1
+      CMP   #RING_PAGE        ; the serial buffer page is hammered below, so it
+      BEQ   @fillnext         ; .. cannot also be held as guard
+
+      LDY   #$00
+@fill1:
+      TYA
+      EOR   BUS_PTR+1         ; pattern = address low byte EOR high byte
+      STA   (BUS_PTR),Y
+      INY
+      BNE   @fill1            ; do the page
+
+@fillnext:
+      INC   BUS_PTR+1         ; then step to the next one
+      LDA   BUS_PTR+1
+      CMP   #GUARD_HI
+      BNE   @fillpage
+
+; hammer page one the way GOSUB does, a read followed by a push, with the reads
+; alternating between the top of RAM and zero page so that most of the address
+; bus changes on either side of every write
+
+@pass:
+      LDX   #$FF
+      TXS
+      LDY   #$00
+@push:
+      LDA   $3F00,Y           ; read high up the address bus ..
+      PHA                     ; .. then write to page one
+      JSR   @spin             ; a JSR/RTS pair, for the pushes GOSUB makes
+                              ; through its own nested calls
+      LDA   $0080,Y           ; and a low read before the next write
+      PHA
+      INY
+      BNE   @push             ; 512 pushes, which wraps right through the page
+
+      LDX   #$FF              ; the pushes wrapped the stack, put it back
+      TXS
+
+      LDY   #$00              ; now hammer the serial buffer page
+@ring:
+      TYA
+      EOR   #$5A
+      STA   $0300,Y
+      INY
+      BNE   @ring
+
+; and check that nothing landed anywhere it should not have
+
+      STZ   BUS_PTR
+      LDA   #GUARD_LO
+      STA   BUS_PTR+1
+@checkpage:
+      LDA   BUS_PTR+1
+      CMP   #RING_PAGE        ; skip the page the stress above writes
+      BEQ   @checknext
+
+      LDY   #$00
+@check:
+      TYA
+      EOR   BUS_PTR+1         ; what this byte should hold
+      CMP   (BUS_PTR),Y
+      BNE   @stray
+@next:
+      INY
+      BNE   @check            ; do the page
+
+@checknext:
+      INC   BUS_PTR+1         ; then step to the next one
+      LDA   BUS_PTR+1
+      CMP   #GUARD_HI
+      BNE   @checkpage
+
+      INC   BUS_CNT           ; one more clean pass
+      BNE   @dot
+      INC   BUS_CNT+1
+@dot:
+      LDA   #'.'              ; something to watch
+      JSR   CHROUT
+      BRA   @pass
+
+@spin:
+      RTS
+
+; report a byte of the guard that changed, put it back, and carry on
+
+@stray:
+      JSR   CRLF
+      LDX   #$00
+@smsg:
+      LDA   BUS_TX2,X
+      BEQ   @swhere
+      JSR   CHROUT
+      INX
+      BNE   @smsg             ; loop, branch always
+
+@swhere:
+      LDA   BUS_PTR+1         ; the address that changed
+      JSR   PRHEX
+      TYA
+      JSR   PRHEX
+      JSR   SPACE
+      TYA                     ; what it should have held
+      EOR   BUS_PTR+1
+      JSR   PRHEX
+      JSR   SPACE
+      LDA   (BUS_PTR),Y       ; and what it does hold
+      JSR   PRHEX
+      JSR   SPACE
+      LDA   BUS_CNT+1         ; how many clean passes came before it
+      JSR   PRHEX
+      LDA   BUS_CNT
+      JSR   PRHEX
+
+      TYA                     ; put it back so that one run collects the whole
+      EOR   BUS_PTR+1         ; pattern rather than stopping at the first
+      STA   (BUS_PTR),Y
+      BRA   @next
+
+BUS_TXT
+      .byte $0D,$0A,"BUS TEST - ADDR WAS GOT PASS - RESET TO STOP",$0D,$0A,$00
+
+BUS_TX2
+      .byte "*** BUS ",$00
+
+      .segment "CODE"
+
+.endif                        ; DIAG_BUILT
+
+.endif                        ; TOOLS_BUILT
 
 ; vector tables
 
