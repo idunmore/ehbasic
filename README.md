@@ -45,39 +45,118 @@ Note that the flow control is based on Ben's build that fixes the 65C51 UART bug
 
 This update also includes a fix for an interrupt safety issue (see the commit details).
 
-### Additional Enhancements
+## Additional Enhancements
 
-#### Type-Ahead No Longer Loses Characters
+### Type-Ahead No Longer Loses Characters
 
-Stock EhBASIC looks for `[CTRL-C]` by reading the input device itself, from
-`CTRLC`, which runs after every direct command and between the statements of a
-running program. Whatever byte it finds is put in `ccbyte` under a countdown
-that only `GET` ever reads, so anything that is not a `[CTRL-C]` is swallowed.
-With input buffered, that reliably eats a character whenever anything is typed
-or pasted ahead of the prompt: `NEW` followed immediately by `10 PRINT "A"`
+Stock EhBASIC looks for `[CTRL-C]` by reading the input device itself, from `CTRLC`, which runs after every direct command and between the statements of a
+running program. Whatever byte it finds is put in `ccbyte` under a countdown that only `GET` ever reads, so anything that is not a `[CTRL-C]` is swallowed.
+With input buffered, that reliably eats a character whenever anything is typed or pasted ahead of the prompt: `NEW` followed immediately by `10 PRINT "A"`
 would store line **0**.
 
-The `[CTRL-C]` is now spotted by the serial interrupt handler and recorded in a
-flag, and `VEC_CC` points at a check that reads that flag instead of the input
-stream (`CCHECK` in `min_mon.s`). Nothing is taken out of the input, and
-`[CTRL-C]` still breaks a running program even with type-ahead queued up behind
-it. A `[CTRL-C]` typed at the `Ready` prompt is discarded once the line it was
-typed into is complete, so it does not stop whatever is entered next.
+The `[CTRL-C]` is now spotted by the serial interrupt handler and recorded in a flag, and `VEC_CC` points at a check that reads that flag instead of the input
+stream (`CCHECK` in `min_mon.s`). Nothing is taken out of the input, and `[CTRL-C]` still breaks a running program even with type-ahead queued up behind
+it. A `[CTRL-C]` typed at the `Ready` prompt is discarded once the line it was typed into is complete, so it does not stop whatever is entered next.
 
-#### True BACKSPACE Support
+### True BACKSPACE Support
 
 `BACKSPACE` now visually deletes the character it back-spaces over, rather than leaving it on the display.  This works for all input.
 
-#### WozMon Monitor in ROM
+### WozMon Monitor in ROM
 
 I like having WozMon available on my BE6502 ROMs, particularly those involving BASIC in some form (in addition to this EhBASIC version, I've also built a modified version of [Microsoft BASIC](https://github.com/idunmore/msbasic)).  You can switch back/forth between EhBASIC and WozMon.  Be sure to choose [W]arm start when coming back into EhBASIC if you want to retain the program that was there when you ran `MONITOR`.
 
+## LCD Commands
+
+**Note:** The BE6502 build this ROM is written for has an HD44780 character LCD on VIA port B, in 4 bit mode, wired the way Ben Eater's `lcd.s` expects it:
+
+| Port B | LCD |
+| --- | --- |
+| `PB0-PB3` | `D4-D7`, the 4 bit data nibble |
+| `PB4` | `RS`, register select |
+| `PB5` | `RW`, read/write |
+| `PB6` | `E`, enable |
+
+**A board with no LCD wired to port B would hang at reset**, because `LCDINIT` polls the display's busy flag and a floating input never clears it. That is what `make LCD=0` is for; it leaves the whole thing out, `JSR LCDINIT` included. Everything here assumes the default build with the LCD in.
+
+### The LCD Keywords
+
+Thirteen keywords are provided. They are *real* EhBASIC keywords, not `CALL`s, so they tokenize and `LIST` like anything else. They are ported from the same command set my [Microsoft BASIC](https://github.com/idunmore/msbasic) build for this board carries, so programs move between the two with little more than a retype.
+
+| Command | Argument | What it does |
+| --- | --- | --- |
+| `LCDCLS` | — | clear the display, which also sends the cursor home |
+| `LCDHOME` | — | cursor to the first character of the first line |
+| `LCDPRINT` | expression list | print to the display |
+| `LCDCURPOS n` | byte | set the DDRAM address, which is where the next character lands |
+| `LCDDDRAM n` | byte | the same command under its hardware name |
+| `LCDMOVECUR n` | signed | move the cursor right (`n` positive) or left (`n` negative) |
+| `LCDSCROLL n` | signed | scroll the display right (`n` positive) or left (`n` negative) |
+| `LCDCURENABLE n` | byte | `0` turns the cursor off, anything else turns it on |
+| `LCDCURBLINK n` | byte | `0` stops the cursor blinking, anything else starts it |
+| `LCDCGRAM n` | byte | point writes at the character generator instead of the screen |
+| `LCDCGCHRS` | expression list | write character generator data as characters |
+| `LCDCGBYTE n` | byte | write one character generator byte as a number |
+| `LCDCMD n` | byte | send a raw HD44780 instruction byte |
+
+<details>
+
+<summary>
+### LCD Command/Keyword Details
+</summary>
+
+`LCDPRINT` takes a full `PRINT` style list, so `LCDPRINT "N=";N` works. `;` and `,` are both plain separators — there are no tab stops to move to on a 16 or 20 column display. There is no newline: the display has no scroll, so where the next character goes is `LCDCURPOS`'s business. Numbers are formatted exactly as `PRINT` formats them, which **includes** the *leading space* `PRINT` puts in front of a positive value (important when you are counting columns on a 16 wide display).
+
+```
+10 LCDCLS
+20 LCDPRINT "TEMP:";T;" C"
+30 LCDCURPOS 64 : REM second line
+40 LCDPRINT "MAX:";M
+```
+
+### Cursor Positions
+
+`LCDCURPOS` takes a DDRAM address, not a row and column, and the second line does not follow on from the first. On a 16x2 module line 1 is `$00-$0F` and line 2 is `$40-$4F`; on a 20x4 the four lines start at `$00`, `$40`, `$14` and `$54`.
+
+`LCDMOVECUR` and `LCDSCROLL` both wrap at the display extents, so counts larger than the display go round rather than stopping.
+
+### Custom Characters
+
+There are 8 user definable characters of 8 bytes each, 8 rows of 5 pixels, where only the low 5 bits of each byte are used and a set bit is a lit pixel. `LCDCGRAM` sets the byte offset into that memory — the character you want times 8, or any single row of any character — and `LCDCGBYTE` writes one row. Once defined, print the character with `CHR$(n)` for `n` of 0 to 7.
+
+
+```
+10 LCDCGRAM 0 : REM character 0
+20 FOR I = 0 TO 7 : READ B : LCDCGBYTE B : NEXT
+30 DATA 0,10,10,0,17,14,0,0
+40 LCDCURPOS 0
+50 LCDPRINT CHR$(0)
+```
+
+`LCDCGCHRS` is the same routine as `LCDPRINT` under a second name. Which one you reach for is about what you have in hand: `LCDCGBYTE` for numbers, `LCDCGCHRS` for a string of character codes.
+
+### Cursor Enable/Blink Interactions
+
+`LCDCURENABLE` and `LCDCURBLINK` each rewrite the whole HD44780 display control byte, so setting one clobbers the other — turning blink off leaves a solid cursor on, and turning the cursor off clears blink. That is consistent with my MS-BASIC version does and it is deliberately kept. `LCDCMD` is the way to set the odd combinations the two commands cannot express, cursor on with the display off and so on.
+
+### LCD Initialization
+
+The `LCDINIT` routine runs from `RES_vec` at reset, before the `[C]old/[W]arm` prompt, and brings the display up in 4 bit mode, 2 lines, 5x8 font, cursor on, blink off. It opens with a delay, because the HD44780 wants more than 15 ms after VCC comes up before it will take its first instruction and `RES_vec` gets there in microseconds. The loop is sized by `LCD_WARMUP` in `custom_commands.s`, `$30` giving 62 ms on a 1 MHz board and still clearing 15 ms at 4 MHz. Increase it if you clock faster than that.
+
+</details>
+
 ## Build Options
+
+There are two classes of build options currently:
+
+- **Debug Options** - Disabled by Default 
+- **LCD Commands** - Enabled by Default
 
 None of the debug machinery below is in the ROM unless you build for it. A plain `make` produces the stock image with no trace of it — no code, no cost, and the `POKE` address is inert.
 
 ```
-make                      the stock ROM
+make                      the stock ROM, LCD extensions in
+make LCD=0                leave the HD44780 LCD extensions out entirely
 make SENTINEL=n           build the program chain sentinel in, armed at n
                           headers per statement on reset. n=0 builds it in but
                           leaves it disarmed
@@ -85,6 +164,9 @@ make DEBUG=1              build the block watch, the 8009R bus stress test and
                           the page zero dump in
 make SENTINEL=1 DEBUG=1   both
 ```
+
+`LCD` defaults to **1**, so the LCD commands are in the stock ROM. `make LCD=0` takes out the driver, the thirteen keywords, their table entries in `basic.s` and the `LCDINIT` call at reset — the result is byte for byte the ROM you would have got before any of it was written. Build that way if your board has
+no LCD on VIA port B, and see [LCD Commands](#lcd-commands) for why it matters.
 
 <details>
  
@@ -258,7 +340,7 @@ Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` fo
 | Range | Contents |
 | --- | --- |
 | `$8000-$800B` | entry jump table |
-| `$800C-$AC38` | EhBASIC, the minimal monitor and the custom commands |
+| `$800C-$AC29` | EhBASIC, the minimal monitor, the LCD driver and the custom commands |
 | `$FC00-$FCFA` | bus stress test, pinned high on purpose |
 | `$FE00-$FEFA` | WozMon |
 | `$FFFA-$FFFF` | NMI, RESET and IRQ vectors |
@@ -268,18 +350,11 @@ Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` fo
 | `$E2-$E3`, `$E8-$ED` | chain sentinel / byte watch / bus test scratch |
 | `$EE` | byte watch switch |
 
-WozMon lives at `$FE00` rather than its native `$FF00` because the vectors at `$FFFA`
-leave only 250 bytes there, and this version is slightly larger. It shares `CHRIN` and
-`CHROUT` with the rest of the ROM instead of carrying its own copy of the 65C51 transmit
-bug workaround, so it gets the same interrupt driven input, flow control and visual
-backspace as BASIC does.
+WozMon lives at `$FE00` rather than its native `$FF00` because the vectors at `$FFFA` leave only 250 bytes there, and this version is slightly larger. It shares `CHRIN` and `CHROUT` with the rest of the ROM instead of carrying its own copy of the 65C51 transmit bug workaround, so it gets the same interrupt driven input, flow control and visual backspace as BASIC does.
 
-### Adding your own commands
+### Adding Your Own Commands
 
-`MONITOR` is a *real* EhBASIC keyword, not a `CALL`. Adding another follows the same four
-table edits in `basic.s` — a `TK_` equate, a `LAB_CTBL` vector, a keyword table entry
-under its first letter, and a `LAB_KEYT` entry for `LIST` to detokenize it — with the
-command body itself in `custom_commands.s`.
+`MONITOR` is a *real* EhBASIC keyword, not a `CALL`. Adding another follows the same four table edits in `basic.s` — a `TK_` equate, a `LAB_CTBL` vector, a keyword table entry under its first letter, and a `LAB_KEYT` entry for `LIST` to detokenize it — with the command body itself in `custom_commands.s`. The thirteen `LCD*` keywords are the same four edits done thirteen times.
 
 ## Origins & EhBASIC
 

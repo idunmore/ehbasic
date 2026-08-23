@@ -2,7 +2,7 @@ CA65=ca65
 LD65=ld65
 CA65FLAGS=--cpu 65C02 --feature labels_without_colons
 
-# optional build time features, both off unless asked for. see min_mon.s
+# optional build time features, these two off unless asked for. see min_mon.s
 #
 #   make SENTINEL=n   build the program chain sentinel in, armed at n headers
 #                     per statement on reset. 0 builds it in but leaves it
@@ -10,8 +10,17 @@ CA65FLAGS=--cpu 65C02 --feature labels_without_colons
 #   make DEBUG=1      build the block watch, the 8009R bus stress test and the
 #                     page zero dump in
 #
+# and one that is on unless you turn it off
+#
+#   make LCD=0        leave the HD44780 LCD extensions out entirely. do this on
+#                     a board with no LCD on VIA port B, because LCDINIT polls
+#                     the display's busy flag at reset and a floating input
+#                     never clears it, which hangs the machine before the
+#                     [C]old/[W]arm prompt
+#
 # examples
-#   make                        the stock ROM, none of it
+#   make                        the stock ROM, LCD in, no debug aids
+#   make LCD=0                  no LCD, for a board without one fitted
 #   make SENTINEL=1             sentinel in, armed at 1
 #   make SENTINEL=1 DEBUG=1     everything
 
@@ -21,6 +30,12 @@ endif
 ifdef DEBUG
 CA65FLAGS += -D DEBUG_TOOLS=1
 endif
+
+# unlike the two above this one is always passed, because it defaults to on.
+# min_mon.s and custom_commands.s both fall back to 1 if it is missing, so a
+# hand run of ca65 without it still gets the same ROM a plain "make" does
+LCD ?= 1
+CA65FLAGS += -D LCD_ENABLE=$(LCD)
 
 OBJS=obj/min_mon.o obj/wozmon.o obj/custom_commands.o
 

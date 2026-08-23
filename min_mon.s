@@ -8,7 +8,28 @@
 ; The MONITOR command body lives in custom_commands.s. importing it here,
 ; ahead of the include, keeps the edits to basic.s down to table entries
 
+; the LCD extensions default to in, so a missing LCD_ENABLE means yes, not no.
+; ca65 resolves .if as it goes, so this has to come before the first test of
+; it, both here and in basic.s where it guards the LCD keywords' table entries
+
+.ifdef LCD_ENABLE
+LCD_BUILT    = LCD_ENABLE
+.else
+LCD_BUILT    = 1
+.endif
+
       .import LAB_MONITOR
+
+; the LCD driver and the LCD keyword bodies live in custom_commands.s too.
+; basic.s names the command entry points in LAB_CTBL and LCDINIT is called from
+; RES_vec below, so both have to be imported ahead of the include
+
+.if LCD_BUILT
+      .import LCDINIT
+      .import LCDCMD, LCDPRINT, LCDCGCHRS, LCDCLS, LCDHOME
+      .import LCDCURPOS, LCDDDRAM, LCDCGRAM, LCDCGBYTE
+      .import LCDCURENABLE, LCDCURBLINK, LCDMOVECUR, LCDSCROLL
+.endif
 
 ; CHRIN and CHROUT are the serial primitives, wozmon.s uses them rather than
 ; carrying its own copy of the 65C51 transmit bug workaround
@@ -36,7 +57,12 @@ BRK_FLAG     = $E7            ; [CTRL-C] seen by the interrupt handler
 ;   DEBUG_TOOLS    define to build the block watch, the 8009R bus stress test
 ;                  and the page zero dump in
 ;
-; neither is defined by a plain "make", so the stock ROM carries none of it
+; neither is defined by a plain "make", so the stock ROM carries none of it.
+;
+;   LCD_ENABLE     the odd one out, set to 0 to leave the HD44780 LCD
+;                  extensions out. it is always passed by the Makefile and
+;                  defaults to 1, so the stock ROM does carry them. tested via
+;                  LCD_BUILT, which is worked out at the top of this file
 
 .ifdef SENTINEL_INIT
 SENT_BUILT   = 1
@@ -76,6 +102,18 @@ WCH_STEP     = 4              ; bytes checked per statement
 
       .include "basic.s"
 
+; the LCD command bodies in custom_commands.s are a port of code written for
+; Microsoft BASIC, so they need EhBASIC's parameter fetching. these have to be
+; exported from here rather than from basic.s because this is the unit that
+; includes it. see the table at the top of custom_commands.s for what each one
+; stood in for on the MS-BASIC side
+
+.if LCD_BUILT
+      .export LAB_GTBY, LAB_EVNM, LAB_EVIR, LAB_EVEX
+      .export LAB_296E, LAB_20AE, LAB_22B6, LAB_IGBY, LAB_GBYT
+      .exportzp Dtypef, FAC1_2, FAC1_3, ut1_pl
+.endif
+
 ; put the IRQ and MNI code in RAM so that it can be changed
 
 IRQ_vec     = VEC_SV+2        ; IRQ code vector
@@ -112,6 +150,10 @@ RES_vec
       LDX   #$FF              ; empty stack
       TXS                     ; set the stack
       JSR   ACIAsetup         ; init ring buffer and ACIA (receiver IRQ enabled)
+.if LCD_BUILT
+      JSR   LCDINIT           ; bring the LCD up. port B, so it does not collide
+                              ; with the flow control bit ACIAsetup put on port A
+.endif
 .if SENT_BUILT
       LDA   #SENTINEL_INIT    ; the chain sentinel's setting at reset, fixed
       STA   CHK_N             ; .. at build time. POKE 236,n overrides it

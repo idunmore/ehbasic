@@ -367,9 +367,33 @@ TK_IRQ            = TK_BITCLR+1     ; IRQ token
 TK_NMI            = TK_IRQ+1        ; NMI token
 TK_MONITOR        = TK_NMI+1        ; MONITOR token
 
+; LCD commands, see custom_commands.s. these have to sit with the primary
+; commands, below TK_TAB, because only tokens before TAB can start a statement.
+; LCD_BUILT comes from min_mon.s, which settles it before this include
+
+.if LCD_BUILT
+TK_LCDCGBYTE      = TK_MONITOR+1    ; LCDCGBYTE token
+TK_LCDCGCHRS      = TK_LCDCGBYTE+1  ; LCDCGCHRS token
+TK_LCDCGRAM       = TK_LCDCGCHRS+1  ; LCDCGRAM token
+TK_LCDCLS         = TK_LCDCGRAM+1   ; LCDCLS token
+TK_LCDCMD         = TK_LCDCLS+1     ; LCDCMD token
+TK_LCDCURBLINK    = TK_LCDCMD+1     ; LCDCURBLINK token
+TK_LCDCURENABLE   = TK_LCDCURBLINK+1 ; LCDCURENABLE token
+TK_LCDCURPOS      = TK_LCDCURENABLE+1 ; LCDCURPOS token
+TK_LCDDDRAM       = TK_LCDCURPOS+1  ; LCDDDRAM token
+TK_LCDHOME        = TK_LCDDDRAM+1   ; LCDHOME token
+TK_LCDMOVECUR     = TK_LCDHOME+1    ; LCDMOVECUR token
+TK_LCDPRINT       = TK_LCDMOVECUR+1 ; LCDPRINT token
+TK_LCDSCROLL      = TK_LCDPRINT+1   ; LCDSCROLL token
+.endif
+
 ; secondary command tokens, can't start a statement
 
+.if LCD_BUILT
+TK_TAB            = TK_LCDSCROLL+1  ; TAB token
+.else
 TK_TAB            = TK_MONITOR+1    ; TAB token
+.endif
 TK_ELSE           = TK_TAB+1        ; ELSE token
 TK_TO             = TK_ELSE+1       ; TO token
 TK_FN             = TK_TO+1         ; FN token
@@ -8197,6 +8221,21 @@ LAB_CTBL
       .word LAB_IRQ-1         ; IRQ             new command
       .word LAB_NMI-1         ; NMI             new command
       .word LAB_MONITOR-1     ; MONITOR         new command
+.if LCD_BUILT
+      .word LCDCGBYTE-1       ; LCDCGBYTE       new command
+      .word LCDCGCHRS-1       ; LCDCGCHRS       new command
+      .word LCDCGRAM-1        ; LCDCGRAM        new command
+      .word LCDCLS-1          ; LCDCLS          new command
+      .word LCDCMD-1          ; LCDCMD          new command
+      .word LCDCURBLINK-1     ; LCDCURBLINK     new command
+      .word LCDCURENABLE-1    ; LCDCURENABLE    new command
+      .word LCDCURPOS-1       ; LCDCURPOS       new command
+      .word LCDDDRAM-1        ; LCDDDRAM        new command
+      .word LCDHOME-1         ; LCDHOME         new command
+      .word LCDMOVECUR-1      ; LCDMOVECUR      new command
+      .word LCDPRINT-1        ; LCDPRINT        new command
+      .word LCDSCROLL-1       ; LCDSCROLL       new command
+.endif
 
 ; function pre process routine table
 
@@ -8501,6 +8540,45 @@ TAB_ASCL
 LBB_LCASES
       .byte "CASE$(",TK_LCASES
                               ; LCASE$(
+.if LCD_BUILT
+LBB_LCDCGBYTE
+      .byte "CDCGBYTE",TK_LCDCGBYTE
+                              ; LCDCGBYTE
+LBB_LCDCGCHRS
+      .byte "CDCGCHRS",TK_LCDCGCHRS
+                              ; LCDCGCHRS
+LBB_LCDCGRAM
+      .byte "CDCGRAM",TK_LCDCGRAM
+                              ; LCDCGRAM
+LBB_LCDCLS
+      .byte "CDCLS",TK_LCDCLS ; LCDCLS
+LBB_LCDCMD
+      .byte "CDCMD",TK_LCDCMD ; LCDCMD
+LBB_LCDCURBLINK
+      .byte "CDCURBLINK",TK_LCDCURBLINK
+                              ; LCDCURBLINK
+LBB_LCDCURENABLE
+      .byte "CDCURENABLE",TK_LCDCURENABLE
+                              ; LCDCURENABLE
+LBB_LCDCURPOS
+      .byte "CDCURPOS",TK_LCDCURPOS
+                              ; LCDCURPOS
+LBB_LCDDDRAM
+      .byte "CDDDRAM",TK_LCDDDRAM
+                              ; LCDDDRAM
+LBB_LCDHOME
+      .byte "CDHOME",TK_LCDHOME
+                              ; LCDHOME
+LBB_LCDMOVECUR
+      .byte "CDMOVECUR",TK_LCDMOVECUR
+                              ; LCDMOVECUR
+LBB_LCDPRINT
+      .byte "CDPRINT",TK_LCDPRINT
+                              ; LCDPRINT
+LBB_LCDSCROLL
+      .byte "CDSCROLL",TK_LCDSCROLL
+                              ; LCDSCROLL
+.endif
 LBB_LEFTS
       .byte "EFT$(",TK_LEFTS  ; LEFT$(
 LBB_LEN
@@ -8737,6 +8815,34 @@ LAB_KEYT
       .word LBB_NMI           ; NMI
       .byte 7,'M'
       .word LBB_MONITOR       ; MONITOR
+.if LCD_BUILT
+      .byte 9,'L'
+      .word LBB_LCDCGBYTE     ; LCDCGBYTE
+      .byte 9,'L'
+      .word LBB_LCDCGCHRS     ; LCDCGCHRS
+      .byte 8,'L'
+      .word LBB_LCDCGRAM      ; LCDCGRAM
+      .byte 6,'L'
+      .word LBB_LCDCLS        ; LCDCLS
+      .byte 6,'L'
+      .word LBB_LCDCMD        ; LCDCMD
+      .byte 11,'L'
+      .word LBB_LCDCURBLINK   ; LCDCURBLINK
+      .byte 12,'L'
+      .word LBB_LCDCURENABLE  ; LCDCURENABLE
+      .byte 9,'L'
+      .word LBB_LCDCURPOS     ; LCDCURPOS
+      .byte 8,'L'
+      .word LBB_LCDDDRAM      ; LCDDDRAM
+      .byte 7,'L'
+      .word LBB_LCDHOME       ; LCDHOME
+      .byte 10,'L'
+      .word LBB_LCDMOVECUR    ; LCDMOVECUR
+      .byte 8,'L'
+      .word LBB_LCDPRINT      ; LCDPRINT
+      .byte 9,'L'
+      .word LBB_LCDSCROLL     ; LCDSCROLL
+.endif
 
 ; secondary commands (can't start a statement)
 
