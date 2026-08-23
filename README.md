@@ -31,7 +31,7 @@ Hence ... the point, and goal, of this project.
 ### Starting Point
 The initial code-commit is a full builds-from-source version of EhBASIC that emits a `basic.bin` file that be burned to ROM on a standard BE6502 and "just work", albeit needing terminal pacing (0.6s line, and 0.02s character pacing seems safe, if very slow, for larger programs; smaller programs can use lower values).
 
-*Most of the work, here, was already done by others (the principal source is from [Klaus2m5](https://github.com/Klaus2m5/6502_EhBASIC_V2.22)); all I've done is bring the appropriate parts together in one place, made a few adjustments/tweaks, tidied up some config and the build process for ca65.*
+*Most of the work, here, was already done by others (the principal source is from [Klaus Dormann's](https://github.com/Klaus2m5) [patched](https://github.com/Klaus2m5/6502_EhBASIC_V2.22/tree/master/patched) version of ["regular" EhBASIC v2.22](https://github.com/Klaus2m5/6502_EhBASIC_V2.22)); all I've done for the starting point make a few adjustments/tweaks/config changes so it builds and runs cleanly for the stock Ben Eater 6502 board.*
 
 #### v. Next (is now v. Current)
 
@@ -87,7 +87,11 @@ make SENTINEL=1 DEBUG=1   both
 ```
 
 <details>
-<summary></summary>
+ 
+<summary>Build Option & Debug Aid Details</summary>
+
+## Debug Aid Details
+
 `POKE 236,n` still overrides the sentinel at runtime in any build that has it, so the compile-time value is only the (default) setting it comes up with after a reset.
 
 The `$8009` entry-table slot stays put whether or not the bus stress test is built, so `8000R`, `8003R` and `8006R` never move; without `DEBUG=1` it is an alias of `$8000`.
