@@ -36,6 +36,11 @@ ASM_CPU_SEL  = 2
 
       .import LAB_MONITOR
 
+; RENUMBER lives in custom_commands.s too, and is always built. basic.s names
+; it in LAB_CTBL, so it has to be imported ahead of the include as well
+
+      .import LAB_RENUMBER
+
 ; the LCD driver and the LCD keyword bodies live in custom_commands.s too.
 ; basic.s names the command entry points in LAB_CTBL and LCDINIT is called from
 ; RES_vec below, so both have to be imported ahead of the include
@@ -148,9 +153,36 @@ WCH_STEP     = 4              ; bytes checked per statement
 
 HELP_BUILT   = LCD_BUILT + ASM_BUILT
 
+; RENUMBER is not optional, so everything it wants is exported unconditionally
+; and taken out of the two blocks below. a symbol can only be exported once
+;
+;   LAB_GBYT   scan at the execute pointer, Z set at end of statement
+;   LAB_IGBY   increment the execute pointer and scan
+;   LAB_GFPN   get a line number, ASCII digits to Itempl/h, caps at 63999
+;   LAB_SNER   syntax error and warm start
+;   LAB_XERR   raise error number X and warm start
+;   LAB_11CF   open up space in memory, "Out of memory" if it will not fit
+;   LAB_1477   reset execution, clear variables, flush the stack
+;   LAB_1274   the warm start: "Ready" and wait for the next command
+;   LAB_18C3   print null terminated string from AY
+;   LAB_295E   print XA as an unsigned integer, used for line numbers
+;   LAB_147A   the body of CLEAR, resets variables and string space
+;
+; the zero page names are the program and memory pointers RENUMBER walks and
+; rewrites. the TK_ ones are byte equates, hence .exportzp, the same way the
+; assembler takes TK_ASM and TK_ENDASM below
+
+      .export LAB_GBYT, LAB_IGBY, LAB_GFPN, LAB_SNER
+      .export LAB_XERR, LAB_11CF, LAB_147A, LAB_1477, LAB_1274
+      .export LAB_18C3, LAB_295E
+      .exportzp Smeml, Svarl, Itempl, Clineh
+      .exportzp Nbendl, Obendl, Ostrtl
+      .exportzp TK_GOTO, TK_GOSUB, TK_THEN, TK_ELSE, TK_LIST
+      .exportzp TK_RUN, TK_RESTORE, TK_REM, TK_DATA, TK_MINUS
+
 .if HELP_BUILT
       .export LAB_GTBY, LAB_EVNM, LAB_EVEX
-      .export LAB_22B6, LAB_IGBY, LAB_GBYT
+      .export LAB_22B6
       .exportzp Dtypef, ut1_pl
 .endif
 
@@ -159,28 +191,27 @@ HELP_BUILT   = LCD_BUILT + ASM_BUILT
       .exportzp FAC1_2, FAC1_3
 .endif
 
-; and the assembler's own set.
+; and the assembler's own set. what it shares with RENUMBER - LAB_18C3,
+; LAB_295E, LAB_XERR, LAB_147A and most of the page zero names - is in the
+; unconditional block above, so only the parts nothing else wants are left
+; here
 ;
 ;   LAB_F2FX   FAC1 float to fixed, result in Itempl/h and in AY
 ;   LAB_AYFC   signed 16 bit AY to FAC1, how SYM() returns its answer
-;   LAB_18C3   print null terminated string from AY
-;   LAB_295E   print XA as an unsigned integer, used for line numbers
-;   LAB_XERR   raise error number X and warm start
 ;   LAB_1C01   scan for "," else syntax error
 ;   LAB_PRNA   print the character in A, tracking the terminal column. this
 ;              rather than CHROUT, or a listing would leave TPos wrong and
 ;              upset PRINT's tab stops and line wrapping afterwards
 ;   LAB_CRLF   new line, and the thing that resets that column count
-;   LAB_147A   the body of CLEAR, resets variables and string space
 ;   LAB_KEYT   the LIST keyword table, which the line expander walks
 ;   TK_ASM     needed to spot the start of a block while walking the program
 ;   TK_ENDASM  and the end of one
 
 .if ASM_BUILT
-      .export LAB_F2FX, LAB_AYFC, LAB_18C3, LAB_295E, LAB_XERR
-      .export LAB_1C01, LAB_147A, LAB_KEYT, LAB_PRNA, LAB_CRLF
+      .export LAB_F2FX, LAB_AYFC, LAB_1C01, LAB_CRLF
+      .export LAB_KEYT, LAB_PRNA
       .exportzp TK_ASM, TK_ENDASM
-      .exportzp Smeml, Svarl, Earryl, Sstorl, Ememl, Bpntrl, Itempl, Clinel
+      .exportzp Earryl, Sstorl, Ememl, Bpntrl, Clinel
 .endif
 
 ; put the IRQ and MNI code in RAM so that it can be changed

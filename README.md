@@ -361,6 +361,115 @@ Worth knowing, because it looks impossible at first. `BEQ DONE` is stored as `BE
 
 That turns out not to matter. The crunch has to be lossless, because `LIST` must be able to put a line back exactly as it was typed, so the assembler simply expands each line through `LAB_KEYT` — the same table `LIST` uses — before parsing it. The tokenizer is not modified at all, which means it does not matter what order you type or edit the lines in, `LIST` is correct for free, and lower case works because the tokenizer never matched it in the first place.
 
+## RENUMBER
+
+`RENUMBER` renumbers the stored program and fixes up every line number it refers to, so the program still runs afterwards. It is a *real* EhBASIC keyword like the rest of the additions here.
+
+| Command | Argument | What it does |
+| --- | --- | --- |
+| `RENUMBER [new[,inc[,old]]]` | line, line, line | renumber the program from line `old` to start at `new` and step by `inc` |
+
+`new` defaults to `10`, `inc` defaults to `10`, and `old` defaults to the start of the program, so a bare `RENUMBER` gives you 10, 20, 30 and so on.
+
+```
+Ready
+RENUMBER
+
+Ready
+RENUMBER 1000,10,100
+```
+
+The second of those renumbers the lines from 100 upwards to start at 1000 and step by 10, and leaves everything below 100 exactly as it was — including any reference to it.
+
+The arguments are **strictly positional**. A missing one takes its default, but it cannot be skipped over: `RENUMBER 1000` is fine, `RENUMBER ,10` and `RENUMBER 10,,5` are `Syntax Error`.
+
+References are updated after `GOTO`, `GOSUB`, `THEN`, `ELSE`, `RUN`, `RESTORE` and `LIST`, and through the comma list of an `ON <n> GOTO` or `ON <n> GOSUB`. `IF <expr> GOTO <n>` needs nothing special, it is the `GOTO` case. Numbers inside a string, a `REM` or a `DATA` item are left alone, because none of those are keyword positions.
+
+```
+Ready
+LIST
+
+100 PRINT "START"
+110 GOSUB 300
+120 IF X=1 THEN 200 ELSE 130
+130 REM GOTO 100 IS JUST TEXT
+140 ON X GOTO 100,200,300
+200 PRINT "TWO"
+210 RETURN
+300 X=1
+310 RETURN
+Ready
+RENUMBER
+
+Ready
+LIST
+
+10 PRINT "START"
+20 GOSUB 80
+30 IF X=1 THEN 60 ELSE 40
+40 REM GOTO 100 IS JUST TEXT
+50 ON X GOTO 10,60,80
+60 PRINT "TWO"
+70 RETURN
+80 X=1
+90 RETURN
+Ready
+```
+
+`RENUMBER` finishes at the `Ready` prompt, the same as `LIST` or `NEW`, and it clears the variables the way typing a program line in does. `CONT` will not work across it, for the same reason. It also disables `ON IRQ` and `ON NMI` — those hold the *address* of the line they were given rather than its number, and renumbering moves every line, so leaving them armed would point an interrupt at whatever now sits there.
+
+<details>
+<summary>
+RENUMBER Details
+</summary>
+
+### Errors
+
+| Error | Means |
+| --- | --- |
+| `RENUMBER` | the arguments do not work against this program — see below |
+| `Syntax` | a malformed argument list, including a skipped argument |
+| `Out of memory` | there is not enough free RAM to widen the references — see below |
+
+`RENUMBER Error` covers four things:
+
+- an increment of `0`, which would give every line the same number
+- a `new` that does not clear the last line kept below `old`. `RENUMBER 100,10,200` on a program with a line 150 is refused, because the renumbered run would land on top of the lines that keep their numbers
+- a program long enough that the numbering would run past **63999**, which is the highest line number EhBASIC will parse
+- `RENUMBER` reached from inside a running program. Renumbering while running would move the code out from under the execute pointer and the `GOSUB` and `FOR` structures on the stack, so it is a direct mode command only
+
+Every one of those is caught before anything has been touched, so a refused `RENUMBER` leaves the program exactly as it was. So does `Out of memory`.
+
+### Undefined References
+
+A reference to a line that does not exist cannot be renumbered, so it is left as it stands and reported once the renumber is over:
+
+```
+Ready
+RENUMBER 500,5
+
+Undefined 9999 in line 500
+Ready
+```
+
+The line named is its **new** number, so you can `LIST` it straight away. The renumber still happens — one stale `GOTO` does not stop you tidying the program up, it was already broken and it is still broken in the same way.
+
+### Why It Needs Free Memory
+
+A line number lives in the program in two quite different forms. The one in the line header is a binary word, and rewriting it costs nothing. The one after `GOTO` is plain ASCII digits sitting in the tokenized text, which `LAB_GFPN` re-reads every time the statement runs. So `GOTO 90` becoming `GOTO 1000` makes its line two bytes longer.
+
+Working out what a reference becomes means looking its old number up among the line headers, which needs the program in one piece and still on its old numbers. That rules out doing the lookups during a pass that is also shuffling the text about. So `RENUMBER` widens every reference to a fixed five digits first — five being the most a line number can take — swaps the numbers over at that fixed width, where nothing moves at all, and then takes the padding back off.
+
+The free RAM it wants is what that widening costs: at most four bytes per reference, and in practice much less, since most references are already three or four digits. The 500 line `spcwar` needs 237 bytes. It is checked, and refused with `Out of memory`, before anything is modified.
+
+### Speed
+
+`RENUMBER` looks every reference up by walking the line headers, so the work grows with the program times the number of references in it. A 500 line program with a few hundred references takes about three seconds on a 1 MHz board, and well under one on a clocked up one.
+
+There is no progress output, and `[CTRL-C]` will not stop it. That is deliberate: there is no point part way through where the program would still be coherent. A `[CTRL-C]` typed while it runs is discarded at the prompt afterwards, the same as one typed at the prompt itself.
+
+</details>
+
 ## Build Options
 
 There are three classes of build options currently:
@@ -565,7 +674,7 @@ Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` fo
 | Range | Contents |
 | --- | --- |
 | `$8000-$800B` | entry jump table |
-| `$800C-$BBF9` | EhBASIC, the minimal monitor, the LCD driver, the custom commands and the inline assembler |
+| `$800C-$C143` | EhBASIC, the minimal monitor, the LCD driver, the custom commands and the inline assembler |
 | `$FC00-$FCFA` | bus stress test, pinned high on purpose |
 | `$FE00-$FEFA` | WozMon |
 | `$FFFA-$FFFF` | NMI, RESET and IRQ vectors |
@@ -575,9 +684,10 @@ Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` fo
 | `$E2-$E3`, `$E8-$ED` | chain sentinel / byte watch / bus test scratch |
 | `$EE` | byte watch switch |
 | `$2C-$58` | inline assembler working storage, out of EhBASIC's unused `$13-$5A` |
+| `$13-$23` | `RENUMBER` working storage, the rest of that same unused block |
 | top of RAM | the assembler's code image, symbol table and line buffer, below a lowered `Ememl` |
 
-`$13-$23` is left entirely free. With `make ASM=0` the `$2C-$58` block is free as well, and the top of RAM is not touched.
+`$59-$5A` is all that is left free. With `make ASM=0` the `$2C-$58` block is free as well, and the top of RAM is not touched. `RENUMBER` is not optional, so its `$13-$23` is spoken for in every build, but nothing in it has to survive the command.
 
 WozMon lives at `$FE00` rather than its native `$FF00` because the vectors at `$FFFA` leave only 250 bytes there, and this version is slightly larger. It shares `CHRIN` and `CHROUT` with the rest of the ROM instead of carrying its own copy of the 65C51 transmit bug workaround, so it gets the same interrupt driven input, flow control and visual backspace as BASIC does.
 
@@ -585,9 +695,11 @@ WozMon lives at `$FE00` rather than its native `$FF00` because the vectors at `$
 
 `MONITOR` is a *real* EhBASIC keyword, not a `CALL`. Adding another follows the same four table edits in `basic.s` — a `TK_` equate, a `LAB_CTBL` vector, a keyword table entry under its first letter, and a `LAB_KEYT` entry for `LIST` to detokenize it — with the command body itself in `custom_commands.s`. The thirteen `LCD*` keywords are the same four edits done thirteen times.
 
+A command that is **not** behind a build flag wants its token in the unconditional run, above the `.if ASM_BUILT` and `.if LCD_BUILT` groups, the way `RENUMBER` has it. Put it after them and its token value, and so its `LAB_CTBL` and `LAB_KEYT` ordinals, move about depending on what else got built. The same goes for a new error code in `LAB_BAER`. And anything in `custom_commands.s` that is always built needs whatever it borrows from EhBASIC exported unconditionally from `min_mon.s` — a symbol can only be exported once, so it has to come out of the `HELP_BUILT` and `ASM_BUILT` blocks when it goes into the unconditional one.
+
 Two things to know before you add one. `LAB_KEYT` is a **dense** array indexed `(token-$80)*4`, so a new entry has to go in at exactly the right ordinal or `LIST` prints garbage from that token on. And within a letter's dictionary table a longer keyword sharing a prefix must come **first** — `ENDASM` sits above `END` for the same reason `DOKE` sits above `DO`, or it would crunch as `END` followed by `ASM`.
 
-There are **seven** token values left. The tokens run `$80` to `$F8`; a function keyword also needs `LAB_FTPL` and `LAB_FTBL` entries, and only tokens below `TK_TAB` can start a statement.
+There are **six** token values left. The tokens run `$80` to `$F9`; a function keyword also needs `LAB_FTPL` and `LAB_FTBL` entries, and only tokens below `TK_TAB` can start a statement.
 
 ## Origins & EhBASIC
 

@@ -103,11 +103,14 @@ Clineh       = Clinel+1
 
 ASM_INDENT   = '|'
 
-ERRNUM_ASM   = $24            ; "Assembly syntax"
-ERRNUM_UL    = $26            ; "Undefined label"
-ERRNUM_DL    = $28            ; "Duplicate label"
-ERRNUM_BR    = $2A            ; "Branch out of range"
-ERRNUM_BLK   = $2C            ; "ASM block"
+; these follow RENUMBER's $24 in LAB_BAER, which is unconditional and so has
+; to come first. they moved up by two when it went in
+
+ERRNUM_ASM   = $26            ; "Assembly syntax"
+ERRNUM_UL    = $28            ; "Undefined label"
+ERRNUM_DL    = $2A            ; "Duplicate label"
+ERRNUM_BR    = $2C            ; "Branch out of range"
+ERRNUM_BLK   = $2E            ; "ASM block"
 
 ; ---------------------------------------------------------------------------
 ; zero page

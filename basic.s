@@ -367,6 +367,13 @@ TK_IRQ            = TK_BITCLR+1     ; IRQ token
 TK_NMI            = TK_IRQ+1        ; NMI token
 TK_MONITOR        = TK_NMI+1        ; MONITOR token
 
+; RENUMBER, see custom_commands.s. it is always built, so it sits here in the
+; unconditional run rather than in one of the .if groups below. that keeps its
+; token value, and so its LAB_CTBL and LAB_KEYT ordinals, the same in every
+; build, which the two optional groups below cannot manage between them
+
+TK_RENUMBER       = TK_MONITOR+1    ; RENUMBER token
+
 ; the inline assembler, see assembler.s. these have to sit with the primary
 ; commands, below TK_TAB, because only tokens before TAB can start a statement.
 ; ENDASM never actually runs - reaching it means an ENDASM with no ASM above it
@@ -374,13 +381,13 @@ TK_MONITOR        = TK_NMI+1        ; MONITOR token
 ; ASM_BUILT comes from min_mon.s, which settles it before this include
 
 .if ASM_BUILT
-TK_ASM            = TK_MONITOR+1    ; ASM token
+TK_ASM            = TK_RENUMBER+1   ; ASM token
 TK_ASSEMBLE       = TK_ASM+1        ; ASSEMBLE token
 TK_DASM           = TK_ASSEMBLE+1   ; DASM token
 TK_ENDASM         = TK_DASM+1       ; ENDASM token
 TK_LASTASM        = TK_ENDASM       ; last assembler token
 .else
-TK_LASTASM        = TK_MONITOR      ; nothing added, carry on from MONITOR
+TK_LASTASM        = TK_RENUMBER     ; nothing added, carry on from RENUMBER
 .endif
 
 ; LCD commands, see custom_commands.s. same rule, they have to stay below
@@ -8260,6 +8267,7 @@ LAB_CTBL
       .word LAB_IRQ-1         ; IRQ             new command
       .word LAB_NMI-1         ; NMI             new command
       .word LAB_MONITOR-1     ; MONITOR         new command
+      .word LAB_RENUMBER-1    ; RENUMBER        new command
 .if ASM_BUILT
       .word LAB_ASM-1         ; ASM             new command
       .word LAB_ASSEMBLE-1    ; ASSEMBLE        new command
@@ -8710,6 +8718,9 @@ LBB_READ
       .byte "EAD",TK_READ     ; READ
 LBB_REM
       .byte "EM",TK_REM       ; REM
+LBB_RENUMBER
+      .byte "ENUMBER",TK_RENUMBER
+                              ; RENUMBER
 LBB_RESTORE
       .byte "ESTORE",TK_RESTORE
                               ; RESTORE
@@ -8887,6 +8898,8 @@ LAB_KEYT
       .word LBB_NMI           ; NMI
       .byte 7,'M'
       .word LBB_MONITOR       ; MONITOR
+      .byte 8,'R'
+      .word LBB_RENUMBER      ; RENUMBER
 .if ASM_BUILT
       .byte 3,'A'
       .word LBB_ASM           ; ASM
@@ -9078,23 +9091,29 @@ LAB_BAER
       .word ERR_CN            ;$1E continue error
       .word ERR_UF            ;$20 undefined function
       .word ERR_LD            ;$22 LOOP without DO
+
+; RENUMBER is always built, so its code goes in ahead of the assembler's block
+; below. put it after that block and it would be $2E in a stock ROM and $24 in
+; an ASM=0 one, and custom_commands.s would have to work out which
+
+      .word ERR_RN            ;$24 RENUMBER
 .if ASM_BUILT
-      .word ERR_AS            ;$24 assembly syntax
-      .word ERR_UL            ;$26 undefined label
-      .word ERR_DL            ;$28 duplicate label
-      .word ERR_BR            ;$2A branch out of range
-      .word ERR_BK            ;$2C ASM block
+      .word ERR_AS            ;$26 assembly syntax
+      .word ERR_UL            ;$28 undefined label
+      .word ERR_DL            ;$2A duplicate label
+      .word ERR_BR            ;$2C branch out of range
+      .word ERR_BK            ;$2E ASM block
 .endif
 
 ; I may implement these two errors to force definition of variables and
 ; dimensioning of arrays before use.
 
-;     .word ERR_UV            ;$2E undefined variable (was $24 before the
-                              ; assembler errors above were added)
+;     .word ERR_UV            ;$30 undefined variable (was $24 before the
+                              ; RENUMBER and assembler errors above were added)
 
 ; the above error has been tested and works (see code and comments below LAB_1D8B)
 
-;     .word ERR_UA            ;$30 undimensioned array (was $26, as above)
+;     .word ERR_UA            ;$32 undimensioned array (was $26, as above)
 
 ERR_NF      .byte "NEXT without FOR",$00
 ERR_SN      .byte "Syntax",$00
@@ -9114,6 +9133,7 @@ ERR_ST      .byte "String too complex",$00
 ERR_CN      .byte "Can't continue",$00
 ERR_UF      .byte "Undefined function",$00
 ERR_LD      .byte "LOOP without DO",$00
+ERR_RN      .byte "RENUMBER",$00
 .if ASM_BUILT
 ERR_AS      .byte "Assembly syntax",$00
 ERR_UL      .byte "Undefined label",$00
