@@ -316,22 +316,13 @@ Run `ASSEMBLE` from the immediate prompt, or make it the first line of the progr
 
 The image goes stale on any program line being entered or deleted, on `NEW`, and on `CLEAR`. A plain `RUN` does not invalidate it, so `ASSEMBLE` once and then `RUN` as often as you like.
 
+### How the Source Survives Tokenizing
+
+Worth knowing, because it looks impossible at first. `BEQ DONE` is stored as `BEQ` followed by the **`DO` token** and `NE` — the tokenizer matches keywords at every character position, so `DONE`, `TOTAL`, `ROR`, `AND`, `INC` and plenty of others get chewed on the way in.
+
+That turns out not to matter. The crunch has to be lossless, because `LIST` must be able to put a line back exactly as it was typed, so the assembler simply expands each line through `LAB_KEYT` — the same table `LIST` uses — before parsing it. The tokenizer is not modified at all, which means it does not matter what order you type or edit the lines in, `LIST` is correct for free, and lower case works because the tokenizer never matched it in the first place.
+
 </details>
-
-### The Disassembler
-
-`DASM` decodes the same instruction set the assembler emits, from anywhere in memory — including the ROM:
-
-```
-Ready
-DASM $FE00,4
-FE00  D8         CLD
-FE01  58         CLI
-FE02  80 0B      BRA $FE0F
-FE04  C9 08      CMP #$08
-```
-
-Combined with `SYM` it is the quick way to check what a block actually produced: `DASM SYM("START"),8`.
 
 ### Errors
 
@@ -355,11 +346,21 @@ Ready
 | `Function call` | a value too big for the slot, such as `LDA #$1234` |
 | `Out of memory` | the image and symbol table would collide with the arrays |
 
-### How the Source Survives Tokenizing
 
-Worth knowing, because it looks impossible at first. `BEQ DONE` is stored as `BEQ` followed by the **`DO` token** and `NE` — the tokenizer matches keywords at every character position, so `DONE`, `TOTAL`, `ROR`, `AND`, `INC` and plenty of others get chewed on the way in.
+### The Disassembler
 
-That turns out not to matter. The crunch has to be lossless, because `LIST` must be able to put a line back exactly as it was typed, so the assembler simply expands each line through `LAB_KEYT` — the same table `LIST` uses — before parsing it. The tokenizer is not modified at all, which means it does not matter what order you type or edit the lines in, `LIST` is correct for free, and lower case works because the tokenizer never matched it in the first place.
+`DASM` decodes the same instruction set the assembler emits, from anywhere in memory — including the ROM:
+
+```
+Ready
+DASM $FE00,4
+FE00  D8         CLD
+FE01  58         CLI
+FE02  80 0B      BRA $FE0F
+FE04  C9 08      CMP #$08
+```
+
+Combined with `SYM` it is the quick way to check what a block actually produced: `DASM SYM("START"),8`.
 
 ## RENUMBER
 
