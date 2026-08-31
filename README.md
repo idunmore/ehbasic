@@ -516,7 +516,6 @@ The bottom of the ROM is a jump table, so these addresses stay put no matter how
 | `$8000` | `8000R` | Sign on, then the `[C]old/[W]arm ?` prompt |
 | `$8003` | `8003R` | Force a cold start |
 | `$8006` | `8006R` | Force a warm start, no prompt |
-| `$8009` | `8009R` | RAM bus stress test (see above) |
 
 Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` followed by `W`, or `8006R` on its own, drops you back at `Ready` with your program still listable and runnable.
 
@@ -526,14 +525,11 @@ Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` fo
 | --- | --- |
 | `$8000-$800B` | entry jump table |
 | `$800C-$C143` | EhBASIC, the minimal monitor, the LCD driver, the custom commands and the inline assembler |
-| `$FC00-$FCFA` | bus stress test, pinned high on purpose |
 | `$FE00-$FEFA` | WozMon |
 | `$FFFA-$FFFF` | NMI, RESET and IRQ vectors |
 | `$24-$2B` | WozMon zero page, taken from EhBASIC's unused `$13-$5A` |
 | `$0280-$02FF` | WozMon line buffer, in the tail of page 2 above `Ibuffe` |
 | `$0300-$03FF` | serial receive ring buffer, page aligned |
-| `$E2-$E3`, `$E8-$ED` | chain sentinel / byte watch / bus test scratch |
-| `$EE` | byte watch switch |
 | `$2C-$58` | inline assembler working storage, out of EhBASIC's unused `$13-$5A` |
 | `$13-$23` | `RENUMBER` working storage, the rest of that same unused block |
 | top of RAM | the assembler's code image, symbol table and line buffer, below a lowered `Ememl` |
