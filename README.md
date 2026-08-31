@@ -473,13 +473,11 @@ There is no progress output, and `[CTRL-C]` will not stop it. That is deliberate
 
 ## Build Options
 
-There are three classes of build options currently:
+There are two classes of build options currently:
 
-- **Debug Options** - Disabled by Default
 - **LCD Commands** - Enabled by Default
 - **Inline Assembler** - Enabled by Default
 
-None of the debug machinery below is in the ROM unless you build for it. A plain `make` produces the stock image with no trace of it — no code, no cost, and the `POKE` address is inert.
 
 ```
 make                      the stock ROM, LCD extensions and assembler in
@@ -488,12 +486,6 @@ make ASM=0                leave the inline assembler, SYM() and DASM out
 make ASMCPU=n             which instruction set the assembler covers.
                           0 = NMOS 6502, 1 = 65C02 core, 2 = full WDC
                           W65C02S (the default)
-make SENTINEL=n           build the program chain sentinel in, armed at n
-                          headers per statement on reset. n=0 builds it in but
-                          leaves it disarmed
-make DEBUG=1              build the block watch, the 8009R bus stress test and
-                          the page zero dump in
-make SENTINEL=1 DEBUG=1   both
 ```
 
 `LCD` defaults to **1**, so the LCD commands are in the stock ROM. `make LCD=0` takes out the driver, the thirteen keywords, their table entries in `basic.s` and the `LCDINIT` call at reset — the result is byte for byte the ROM you would have got before any of it was written. Build that way if your board has
@@ -502,148 +494,6 @@ no LCD on VIA port B, and see [LCD Commands](#lcd-commands) for why it matters.
 `ASM` defaults to **1** as well. `make ASM=0` takes out the assembler, the disassembler, the opcode tables, all five keywords and their table entries, and the three flag clears in `basic.s` — and, like `LCD=0`, gives back a ROM byte for byte identical to the one before any of it existed. It costs about 4KB of ROM and nothing at all at run time until you use it, so there is little reason to turn it off unless you need the space.
 
 `ASMCPU` picks how much of the instruction set the assembler and `DASM` know about. It defaults to **2**, the full WDC W65C02S, because that is the part a board built today will have. A Rockwell R65C02 has `RMB`/`SMB`/`BBR`/`BBS` but not `WAI` or `STP`, and a GTE/CMD G65SC02 has none of them — build those with `make ASMCPU=1`. Nothing in the ROM can tell what the silicon actually is, so the flag is the only guard: at the default, the assembler will cheerfully emit an instruction your CPU cannot execute. It does not change the ROM size either way, the tables are a fixed 256 bytes; a lower setting only blanks the entries above the level you pick, so they fail as `Assembly syntax` rather than assembling.
-
-<details>
- 
-<summary>Build Option & Debug Aid Details</summary>
-
-## Debug Aid Details
-
-`POKE 236,n` still overrides the sentinel at runtime in any build that has it, so the compile-time value is only the (default) setting it comes up with after a reset.
-
-The `$8009` entry-table slot stays put whether or not the bus stress test is built, so `8000R`, `8003R` and `8006R` never move; without `DEBUG=1` it is an alias of `$8000`.
-
-Changing either option rebuilds everything automatically — no `make clean` needed.
-
-Sizes, for reference: the stock ROM ends at `$A9B7`, `SENTINEL=n` adds about 300 bytes, `DEBUG=1` about 240 in `CODE` plus 251 at `$FC00`.
-
-## Program Chain Sentinel (Debug Aid)
-
-There is an outstanding bug where, part way through a long `RUN`, a single byte gets written into the stored program. Every instance so far has landed on the
-high byte of a line number in a line header, which throws that line out of order: `LIST <n>` can no longer find it, or anything after it, while a bare `LIST` still walks the chain and shows a line number that could never have been typed. It has not been reproducible under emulation, so the ROM carries a trap for it that runs on a real board.
-
-Build it in with `make SENTINEL=n`, where n is what it comes up with after a reset. The count is also the conditional complitation switch, and `POKE 236,n` overrides it at any time:
-
-```
-POKE 236,16     check 16 line headers per statement
-POKE 236,0      off again
-```
-
-Switched on, EhBASIC's between-statements hook walks that many line headers per statement, picking up where the last statement left off, and checks that every
-line number is greater than the one before it and that every link still points inside the program. When one is not, it reports and breaks:
-
-```
-*** CHAIN 05E9 E8AE 01A4
-0000: 4C 66 81 00 00 00 00 00
-0008: 00 00 4C 4E 8F 00 00 00
-...
-00F8: 00 0B 47 35 DB 5A D7 33
-Break in line 5540
-Ready
-```
-
-The first line reads as: the header at `$05E9` holds line number `$E8AE`, and the line before it was `$01A4`. Then the whole of page zero, in the same shape
-the `MONITOR` dumps it.
-
-That dump is taken at the instant the damage is spotted, before anything else runs, and it matters that it is not done by hand afterwards. `$AA/$AB` is
-EhBASIC's `Baslnl`, and a single branch reparks it onto the damaged line all by itself — the corrupted line number is out of range, so the next line search
-stops there and fails. A dump typed in later cannot tell the pointer that caused the damage from the pointer the damage created.
-
-The `Break in line` names the line that was executing when the damage was *noticed*, which is within one sweep of the line that caused it — a 500 line
-program at 16 headers a statement sweeps every ~31 statements. `POKE 236,255` checks the whole chain about every other statement, which puts the break
-essentially on the culprit.
-
-The program itself is left completely alone, so `LIST` and `MONITOR` still see it exactly as it was. The one thing the report disturbs is the serial receive
-buffer, which it borrows as scratch for the snapshot and then empties, so any type-ahead in flight is lost.
-
-It uses `$E2`, `$E3` and `$E8`-`$ED`, and it re-anchors itself if you edit the program, so it is safe to leave switched on while you type.
-
-### The Block Watch
-
-The chain sentinel is a fairly heavy thing to have running between statements. The block watch is the same idea stripped down: it takes a copy of 128 bytes
-when it is armed, then compares four of them per statement, round robin. A whole sweep costs 32 statements and the check itself costs about **5%**, against
-+8.4% for `POKE 236,1`.
-
-It watches a block rather than a single byte because this fault lands wherever the stack pointer happens to be. An earlier single-address version sat on
-`$05EC` and stayed silent while the very next byte, `$05ED`, was the one being written.
-
-It takes the copy itself, so arming it is three pokes. To watch `$0580`-`$05FF`, which is page five's overlap with the stack addresses EhBASIC actually uses:
-
-```
-POKE 236,0      chain sentinel off, the two share zero page
-POKE 232,128    block base, low byte
-POKE 233,5      block base, high byte
-POKE 238,1      arm
-POKE 238,0      off again
-```
-
-`PEEK(238)` reads 129 once the copy has been taken. The copy lives in WozMon's line buffer at `$0280`, which is free unless WozMon is actually running.
-`POKE 232,0 : POKE 233,11` watches `$0B00`-`$0B7F` instead, covering the `$0B5F` case — page eleven being page three's alias one bit over.
-
-When a byte changes it reports the same way the chain sentinel does:
-
-```
-*** WATCH 05ED 43 30
-0000: 4C 66 81 00 00 00 00 00
-...
-Break in line 9070
-```
-
-The address that changed, the value it held when the watch was armed, and the value found there now, followed by the same page zero dump.
-
-**Note:** Sweeping 128 bytes four at a time means the report can be up to 32 statements behind the write, so the page zero dump no longer
-pins the *exact* statement the way a single-address watch did. That immediacy is what identified the mechanism in the first place. The block version is for
-coverage, and for telling whether a hardware change actually fixed anything.
-
-Only one of the two can be armed at a time — the watch uses `$E8`-`$EA` and `$ED`, which are the chain sentinel's working bytes, and `$EE` as its own switch.
-The watch takes priority: while it is armed the chain walk does not run.
-
-## RAM Bus Stress Test
-
-The line corruption the byte watch caught turned out not to be a software bug at all. The data and the instruction were right; the address was not. Both
-addresses it ever damaged are one address bit away from the only two regions of low RAM that anything writes often:
-
-| damaged | intended | bit | what was writing |
-|---|---|---|---|
-| `$05EC` | `$01EC` | A10 | `LAB_GOSUB` pushing `Bpntrl`, fetched from `$85EE` |
-| `$05ED` | `$01ED` | A10 | `LAB_GOSUB` pushing `Bpntrh`, fetched from `$85EB` |
-| `$0B5F` | `$035F` | A11 | the serial ISR's `STA INPUT_BUFFER,X`, fetched from `$A9xx` |
-
-**Root Cause: Using a DIP EEPROM "emulator" (picROM).** A real AT28C256 carrying the same image runs the reproducer clean indefinitely; putting the emulator back fails within minutes, with decoupling already improved so it is not supply noise. The emulator loads every line of the shared address bus, and the slower edges (not due to the performance of the picoROM, this appears to be more a function of bread-board construction) mean an address bit has not settled by the time the RAM latches a write address. So develop with it if it is convenient, but burn a real EEPROM to run anything that
-matters — and note that a ROM device really can corrupt RAM writes, because they share the address bus.
-
-In every case the bit that went wrong was **high for the instruction fetch and low for the write that followed it**. `$85EB` and `$85EE` both have A10 set;
-the push goes to page one, where A10 is clear. The bit does not fall in time and the write lands a kilobyte away. The ISR case is the same story one bit
-over.
-
-The values confirm it. `$05ED` was written with `$30`, which is exactly `Bpntrh` for a `GOSUB 7000` in a line living at `$30xx`.
-
-`8009R` from the `MONITOR` runs a test for it, in a `make DEBUG=1` build. It hammers those two pages - the stack, with the read-then-push pattern `GOSUB` uses, and the receive buffer - while holding the whole of the rest of RAM as a guard filled with a pattern computed from the address. Anything that turns up in the guard got there by mistake.
-
-**Where the test's own code lives in the ROM is part of the test.** A stress loop can only exercise the address bits that are high at its own fetch address.
-The first version of this routine sat at `$AA93`, where A10 — the very bit that was slipping — is already low, and it ran clean for thousands of passes while a
-BASIC program tripped over the fault in minutes. `basic.cfg` now pins it at `$FC00`, where A9 through A15 are all set, so every one of them has to fall on
-the way into a page one write. Move it and you change what it can find.
-
-```
-BUS TEST - ADDR WAS GOT PASS - RESET TO STOP
-..........................
-*** BUS 05EC E9 31 001A
-....
-```
-
-Address, the value that should be there, the value found, and the number of clean passes before it. **The address is the whole story**: exclusive-or it with
-`$0400` and with `$0800` and see which result lands in page one or page three. That is the address bit that let go.
-
-It puts the byte back and carries on, so one run collects the whole pattern rather than stopping at the first instance. A pass is about a third of a second,
-and it prints a dot for each one.
-
-Interrupts are off throughout, so nothing else can write to RAM and there is no way to type at it — reset the board to stop it, and take the `[C]old` start
-afterwards, because it leaves the whole of RAM full of the guard pattern.
-
-It assumes the stock BE6502 map, 16K of RAM at `$0000`-`$3FFF`.
-
-</details>
 
 ## WozMon
 
