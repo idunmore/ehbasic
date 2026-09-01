@@ -147,7 +147,7 @@ The `LCDINIT` routine runs on RESET; before the `[C]old/[W]arm` prompt, and brin
 
 ## Inline Assembler
 
-The default build now implemented a two pass 6502/65C02 assembler (so forward-references to labels/symbols is supported). Assembly source lives inside the BASIC program as ordinary numbered lines, between `ASM` and `ENDASM`:
+The default build now implements a two pass 6502/65C02 assembler (so forward-references to labels/symbols are supported). Assembly source lives inside the BASIC program as ordinary numbered lines, between `ASM` and `ENDASM`:
 
 ```
 100 ASM
@@ -169,11 +169,11 @@ These lines are treated as real BASIC lines. They `LIST`, they `SAVE` and `LOAD`
 
 | Command | Argument | What it Does/Returns |
 | --- | --- | --- |
-| `ASM` | — | opens a block. Assembles the program if the image is stale, then steps over the block |
-| `ENDASM` | — | closes a block. Never executed |
-| `ASSEMBLE [n]` | byte | assemble the whole program now. A non zero `n` prints a listing |
-| `SYM("NAME")` | string | the address a label was given |
-| `DASM start[,count]` | address, byte | disassemble `count` instructions, 20 by default |
+| `ASM` | — | Opens a block. Assembles the program if the image is stale, then steps over the block |
+| `ENDASM` | — | Closes a block. Never executed |
+| `ASSEMBLE [n]` | byte | Assemble the whole program now. A non zero `n` prints a listing |
+| `SYM("NAME")` | string | The address a label/symbol was given |
+| `DASM start[,count]` | address, byte | Disassemble `count` instructions, 20 by default |
 
 <details>
 <summary>
@@ -244,7 +244,7 @@ Operands take literals, labels, one `+` or `-` offset, and a leading `<` or `>` 
 | `*` | the address of the instruction being assembled |
 | `<LABEL` `>LABEL` | its low or high byte |
 
-There is no precedence and no arithmetic beyond that single offset. This is not the BASIC expression evaluator and does not pretend to be — `LDA #VAL*2` is a syntax error, not a multiplication.
+There is no precedence and no arithmetic beyond that single offset. This is not the BASIC expression evaluator (that may change in a future revision, but first I have to decide how I want to handle it, or at least how to make it obvious that it would capture the expression's value at *assembly* time and not **run** time) ...and does not pretend to be, thus `LDA #VAL*2` is a syntax error, not a multiplication.
 
 ### Zero Page Needs `<`
 
@@ -269,7 +269,7 @@ The modes that only exist in zero page — `($nn,X)`, `($nn),Y`, `($nn)`, and th
 
 ### Code Location
 
-With no `ORG`, the assembler chooses. Pass 1 measures the image, and the assembler then takes exactly that much from the top of RAM and lowers EhBASIC's memory ceiling to match, so string space and arrays can never grow into it:
+With no `ORG`, the assembler chooses. Pass 1 measures the image, and the assembler then takes exactly that much from the top of RAM and lowers EhBASIC's memory ceiling to match, so string space and arrays can never grow into it/collide:
 
 ```
                 +--------------------+  end of memory as cold start found it
@@ -515,16 +515,16 @@ Neither `MONITOR` nor WozMon disturbs the BASIC program in memory, so `8000R` fo
 
 | Range | Contents |
 | --- | --- |
-| `$8000-$800B` | entry jump table |
+| `$8000-$800B` | Entry jump table |
 | `$800C-$C143` | EhBASIC, the minimal monitor, the LCD driver, the custom commands and the inline assembler |
 | `$FE00-$FEFA` | WozMon |
 | `$FFFA-$FFFF` | NMI, RESET and IRQ vectors |
 | `$24-$2B` | WozMon zero page, taken from EhBASIC's unused `$13-$5A` |
 | `$0280-$02FF` | WozMon line buffer, in the tail of page 2 above `Ibuffe` |
-| `$0300-$03FF` | serial receive ring buffer, page aligned |
-| `$2C-$58` | inline assembler working storage, out of EhBASIC's unused `$13-$5A` |
+| `$0300-$03FF` | Serial receive ring buffer, page aligned |
+| `$2C-$58` | Inline assembler working storage, out of EhBASIC's unused `$13-$5A` |
 | `$13-$23` | `RENUMBER` working storage, the rest of that same unused block |
-| top of RAM | the assembler's code image, symbol table and line buffer, below a lowered `Ememl` |
+| top of RAM | The assembler's code image, symbol table and line buffer, below a lowered `Ememl` |
 
 `$59-$5A` is all that is left free. With `make ASM=0` the `$2C-$58` block is free as well, and the top of RAM is not touched. `RENUMBER` is not optional, so its `$13-$23` is spoken for in every build, but nothing in it has to survive the command.
 
