@@ -41,7 +41,7 @@ My original intention was that the next step in the project, barring any clean-u
 
 Thus what was to be "v. Next" is *now* "v. Current".
 
-Note that the flow control is based on Ben's build that fixes the 65C51 UART bug, and requires running a connection from PA0 to CTS.
+Note that the flow control is based on Ben's build that fixes the 65C51 UART bug, and requires running a connection from PA0 to CTS (via the MAX232, per the stock build, but will also work if wired directly via an FTDI-USB interface).
 
 This update also includes a fix for an interrupt safety issue (see the commit details).
 
@@ -49,14 +49,12 @@ This update also includes a fix for an interrupt safety issue (see the commit de
 
 ### Type-Ahead No Longer Loses Characters
 
-Stock EhBASIC looks for `[CTRL-C]` by reading the input device itself, from `CTRLC`, which runs after every direct command and between the statements of a
-running program. Whatever byte it finds is put in `ccbyte` under a countdown that only `GET` ever reads, so anything that is not a `[CTRL-C]` is swallowed.
-With input buffered, that reliably eats a character whenever anything is typed or pasted ahead of the prompt: `NEW` followed immediately by `10 PRINT "A"`
+Stock EhBASIC looks for `[CTRL-C]` by reading the input device itself, from `CTRLC`.  This runs after every direct command and between the statements of a running program. Whatever byte it finds is put in `ccbyte` under a countdown that only `GET` ever reads, so anything that is not a `[CTRL-C]` is swallowed.
+
+With the buffered input implementation, per my first modification here, this would reliably eat a character whenever anything is typed or pasted ahead of the prompt: `NEW` followed immediately by `10 PRINT "A"`
 would store line **0**.
 
-The `[CTRL-C]` is now spotted by the serial interrupt handler and recorded in a flag, and `VEC_CC` points at a check that reads that flag instead of the input
-stream (`CCHECK` in `min_mon.s`). Nothing is taken out of the input, and `[CTRL-C]` still breaks a running program even with type-ahead queued up behind
-it. A `[CTRL-C]` typed at the `Ready` prompt is discarded once the line it was typed into is complete, so it does not stop whatever is entered next.
+To address this, `[CTRL-C]` is now trapped by the serial interrupt handler and recorded in a flag, and `VEC_CC` points at a check that reads _that_ flag instead of the input stream (`CCHECK` in `min_mon.s`). Nothing is taken out of the input, and `[CTRL-C]` still breaks a running program even with type-ahead queued up behind it. A `[CTRL-C]` typed at the `Ready` prompt is discarded once the line it was typed into is complete, so it does not stop whatever is entered next.
 
 ### True BACKSPACE Support
 
@@ -68,7 +66,7 @@ I like having WozMon available on my BE6502 ROMs, particularly those involving B
 
 ## LCD Commands
 
-**Note:** The BE6502 build this ROM is written for has an HD44780 character LCD on VIA port B, in 4 bit mode, wired the way Ben Eater's `lcd.s` expects it:
+**Note:** The BE6502 build this ROM is written for has an HD44780 character LCD on VIA port B, in **4-bit mode**.  The standard build videos don't show this, but details can be found on [Ben's Patreon](https://www.patreon.com/beneater/posts/4-bit-lcd-50900073).
 
 | Port B | LCD |
 | --- | --- |
@@ -77,11 +75,11 @@ I like having WozMon available on my BE6502 ROMs, particularly those involving B
 | `PB5` | `RW`, read/write |
 | `PB6` | `E`, enable |
 
-**A board with no LCD wired to port B would hang at reset**, because `LCDINIT` polls the display's busy flag and a floating input never clears it. That is what `make LCD=0` is for; it leaves the whole thing out, `JSR LCDINIT` included. Everything here assumes the default build with the LCD in.
+**A board with no LCD wired to port B can hang at reset**, because `LCDINIT` polls the display's busy flag and a floating input may (probably) never clear(s) it. So, if you're not using the LCD, run `make LCD=0` to disable (completely exclude) the LCD support, `JSR LCDINIT` included.  The default `make` build **includes** all of the LCD initialization and custom commands.
 
 ### The LCD Keywords
 
-Thirteen keywords are provided. They are *real* EhBASIC keywords, not `CALL`s, so they tokenize and `LIST` like anything else. They are ported from the same command set my [Microsoft BASIC](https://github.com/idunmore/msbasic) build for this board carries, so programs move between the two with little more than a retype.
+Thirteen keywords are provided. They are *real* EhBASIC keywords, not `CALL`s, so they tokenize and `LIST` like anything else. They are ported from the same command set my [Microsoft BASIC](https://github.com/idunmore/msbasic) build for this board carries; no translation or "porting" is needed (well, at least for the LCD commands!).
 
 | Command | Argument | What it does |
 | --- | --- | --- |
@@ -107,7 +105,7 @@ LCD Command/Keyword Details
 
 ### LCD Command/Keyword Details
 
-`LCDPRINT` takes a full `PRINT` style list, so `LCDPRINT "N=";N` works. `;` and `,` are both plain separators — there are no tab stops to move to on a 16 or 20 column display. There is no newline: the display has no scroll, so where the next character goes is `LCDCURPOS`'s business. Numbers are formatted exactly as `PRINT` formats them, which **includes** the *leading space* `PRINT` puts in front of a positive value (important when you are counting columns on a 16 wide display).
+`LCDPRINT` takes a full `PRINT` style list, so `LCDPRINT "N=";N` works. `;` and `,` are both plain separators — there are no tab stops to move to on a 16 or 20 column display. There is no newline: the display has no implicit scroll (like a terminal; but you can issue LCDSCROLL commands to deliberately "scroll" the display left or right), so where the next character goes is determined by `LCDCURPOS` . Numbers are formatted exactly as `PRINT` formats them, which **includes** the *leading space* `PRINT` puts in front of a positive value (important when you are counting columns on a 16 wide display).
 
 ```
 10 LCDCLS
@@ -120,11 +118,11 @@ LCD Command/Keyword Details
 
 `LCDCURPOS` takes a DDRAM address, not a row and column, and the second line does not follow on from the first. On a 16x2 module line 1 is `$00-$0F` and line 2 is `$40-$4F`; on a 20x4 the four lines start at `$00`, `$40`, `$14` and `$54`.
 
-`LCDMOVECUR` and `LCDSCROLL` both wrap at the display extents, so counts larger than the display go round rather than stopping.
+`LCDMOVECUR` and `LCDSCROLL` both wrap at the display extents, so counts larger than the display will "wrap around" rather than being truncated.
 
 ### Custom Characters
 
-There are 8 user definable characters of 8 bytes each, 8 rows of 5 pixels, where only the low 5 bits of each byte are used and a set bit is a lit pixel. `LCDCGRAM` sets the byte offset into that memory — the character you want times 8, or any single row of any character — and `LCDCGBYTE` writes one row. Once defined, print the character with `CHR$(n)` for `n` of 0 to 7.
+There are 8 user definable characters of 8 bytes each, organized as 8 rows of 5 pixels, where only the low 5 bits of each byte are used and a set bit is an enabled ("on") pixel. `LCDCGRAM` sets the byte offset into that memory (the character index you want times 8), or any single row of any character — and `LCDCGBYTE` writes one row. Once defined, print the character with `CHR$(n)` for `n` of 0 to 7.
 
 
 ```
@@ -135,21 +133,21 @@ There are 8 user definable characters of 8 bytes each, 8 rows of 5 pixels, where
 50 LCDPRINT CHR$(0)
 ```
 
-`LCDCGCHRS` is the same routine as `LCDPRINT` under a second name. Which one you reach for is about what you have in hand: `LCDCGBYTE` for numbers, `LCDCGCHRS` for a string of character codes.
+`LCDCGCHRS` is the same routine as `LCDPRINT`, provided as a context-alias. Which one you use depends on what you're doing: `LCDCGBYTE` for numbers, `LCDCGCHRS` for a string of character codes.
 
 ### Cursor Enable/Blink Interactions
 
-`LCDCURENABLE` and `LCDCURBLINK` each rewrite the whole HD44780 display control byte, so setting one clobbers the other — turning blink off leaves a solid cursor on, and turning the cursor off clears blink. That is consistent with my MS-BASIC version does and it is deliberately kept. `LCDCMD` is the way to set the odd combinations the two commands cannot express, cursor on with the display off and so on.
+`LCDCURENABLE` and `LCDCURBLINK` each rewrite the whole HD44780 display control byte, so setting one clobbers the other; both also enable the disaply.  Turning blink off leaves a solid cursor on, and turning the cursor off clears blink. This is consistent with my MS-BASIC version and is deliberate, based on the assumption that turning blinking on or off means you want both the display ON **and** the cursor displayed (or why change it?), and turning it off means you don't care if it was set to blink or not, but, again, if you're changing it you want it **displayed**.  If you want specific control for ALL options, you can track state in your code and use `LCDCMD` to send the required state flags.
 
 ### LCD Initialization
 
-The `LCDINIT` routine runs from `RES_vec` at reset, before the `[C]old/[W]arm` prompt, and brings the display up in 4 bit mode, 2 lines, 5x8 font, cursor on, blink off. It opens with a delay, because the HD44780 wants more than 15 ms after VCC comes up before it will take its first instruction and `RES_vec` gets there in microseconds. The loop is sized by `LCD_WARMUP` in `custom_commands.s`, `$30` giving 62 ms on a 1 MHz board and still clearing 15 ms at 4 MHz. Increase it if you clock faster than that.
+The `LCDINIT` routine runs on RESET; before the `[C]old/[W]arm` prompt, and brings the display up in 4 bit mode, 2 lines, 5x8 font, cursor on, blink off.  There is a built-in delay since the HD44780 requires its own initialization time.
 
 </details>
 
 ## Inline Assembler
 
-The ROM carries a two pass 6502/65C02 assembler. Assembly source lives inside the BASIC program as ordinary numbered lines, between `ASM` and `ENDASM`:
+The default build now implemented a two pass 6502/65C02 assembler (so forward-references to labels/symbols is supported). Assembly source lives inside the BASIC program as ordinary numbered lines, between `ASM` and `ENDASM`:
 
 ```
 100 ASM
@@ -165,11 +163,11 @@ The ROM carries a two pass 6502/65C02 assembler. Assembly source lives inside th
 200 CALL SYM("START")
 ```
 
-Those lines are real BASIC lines. They `LIST`, they `SAVE` and `LOAD` with the program, and you edit them with the same line numbers as everything else.
+These lines are treated as real BASIC lines. They `LIST`, they `SAVE` and `LOAD` with the program, and you edit them with the same line numbers as normal.
 
 ### The Keywords
 
-| Command | Argument | What it does |
+| Command | Argument | What it Does/Returns |
 | --- | --- | --- |
 | `ASM` | — | opens a block. Assembles the program if the image is stale, then steps over the block |
 | `ENDASM` | — | closes a block. Never executed |
@@ -196,7 +194,7 @@ One instruction per line:
 
 ### Indenting with `|`
 
-EhBASIC throws away the spaces between a line number and the first character before it ever stores the line, so `120       BEQ DONE` comes back from `LIST` as `120 BEQ DONE`. Anything non-blank at that position stops the skipping, and that is what the optional `|` prefix is for:
+EhBASIC removes/ignores spaces between a line number and the first non-whitespace character before it stores the line, so `120       BEQ DONE` is stored, and comes back from `LIST`, as `120 BEQ DONE`. Anything non-blank at that position stops the skipping, so the optional `|` prefix is provided to allow indenting ASM code.  Since each indent space is counted as a character, and takes up a byte of program storage (RAM), if memory is tight use fewer spaces on the indent and consider putting labels on their own lines (see below):
 
 ```
 100 ASM
@@ -211,11 +209,11 @@ EhBASIC throws away the spaces between a line number and the first character bef
 190 ENDASM
 ```
 
-That is exactly what `LIST` gives back, and it assembles byte for byte identically to the same source without the prefixes — the assembler steps over the `|` and carries on. It is purely cosmetic and entirely optional.
+Entering the above will be exactly what `LIST` returns.  It assembles byte-for-byte identically to the same source without the indent prefixes.  It is purely cosmetic and entirely optional.
 
 A label can share the margin, as `|LOOP` and `|DONE` do above, so labels and code line up on the same column. A line that is nothing but `|`, or `|` followed by a comment, is simply blank.
 
-`|` was picked because it has no meaning anywhere else: the tokenizer copies it straight through so it costs no token, no 6502 assembler uses it, and outside an `ASM` block it is a syntax error — which is what a stray one should be. It only has any effect as the first non-space character of a line inside a block.
+`|` was picked because it has no meaning anywhere else: the tokenizer copies it straight through so it costs no token, no 6502 assembler uses it, and outside an `ASM` block it is a syntax error — which is what a stray one should be. It only has any effect as the first non-space character of a line inside an ASM/ENDASM block.
 
 It is only necessary to use `|` to indent if it would otherwise mean that only whitespace characters would precede an opcode/instruction:
 
@@ -252,9 +250,9 @@ There is no precedence and no arithmetic beyond that single offset. This is not 
 
 **A symbolic operand always assembles as absolute unless you write `<` in front of it.** `LDA PTR` is three bytes even when `PTR` is `$80`; `LDA <PTR` is the two byte zero page form.
 
-That is not an oversight. The width of an instruction has to be the same in both passes, or every address after it shifts between them and the whole image is wrong. A forward reference has no value yet in pass 1, so the only rule that can be honest is to decide the width from **how the operand is written** rather than from what it turns out to be worth. Literals narrow on their own — `LDA $80` is zero page, `LDA $0080` is absolute, exactly as written — and for a symbol `<` is how you say so. The two meanings coincide: for something that lives in zero page, its low byte *is* its address.
+That is not an oversight, but an artifact of some design (simplification) choices.  The width of an instruction has to be the same in both passes, or every address after it shifts between them and the whole image is wrong. On pass one, a forward-reference has no value (yet), so the only reasonable rule is to decide the width from **how the operand is written** rather than from what it _turns out_ to be. Literals narrow on their own — `LDA $80` is zero page, `LDA $0080` is absolute, exactly as written — and for a symbol `<` is the syntax for indicating that.  It is, perhaps, a bit of an adjustment from other, full-fledged assemblers, but here the two meanings coincide, and yield a useful simplification in implementation.  But, regardless ... for something that lives in *8zero page**, its low byte *is* its address.
 
-The modes that only exist in zero page — `($nn,X)`, `($nn),Y`, `($nn)`, and the `BBR`/`BBS` operand — have no absolute form to fall back on, so they take the low byte and complain if the value will not fit.
+The modes that only exist in zero page — `($nn,X)`, `($nn),Y`, `($nn)`, and the `BBR`/`BBS` operand — have no absolute form to fall back on, so they take the low byte and complain if the value doesn't fit.
 
 ### Directives
 
@@ -267,26 +265,26 @@ The modes that only exist in zero page — `($nn,X)`, `($nn),Y`, `($nn)`, and th
 | `DS n` | reserve `n` bytes, emitting nothing |
 | `ORG n` / `*=n` | assemble at a fixed address from here on |
 
-`ORG` is a one way door. Everything after it is assembled at real addresses, is **not** counted in the protected image, and is **not** protected from BASIC — it is the plain `POKE` contract, for when you want code at a specific place and will keep it clear yourself. Labels defined after an `ORG` are absolute.
+`ORG` has an absolute, one-way, effect. **Everything** after it is assembled at real addresses, is **not** counted in the protected image, and is **not** protected from BASIC (if you stick an ORG value in the middle of something critical, this assembler will gleefully, and obvliviously, address code per your command ...).  This means LABELS/SYMBOL defined after an `ORG` are absolute.
 
-### Where the Code Goes
+### Code Location
 
-With no `ORG`, you do not choose. Pass 1 measures the image, and the assembler then takes exactly that much off the top of RAM and lowers EhBASIC's memory ceiling to match, so string space and arrays can never grow into it:
+With no `ORG`, the assembler chooses. Pass 1 measures the image, and the assembler then takes exactly that much from the top of RAM and lowers EhBASIC's memory ceiling to match, so string space and arrays can never grow into it:
 
 ```
                 +--------------------+  end of memory as cold start found it
                 |   work buffer      |  80 bytes
                 +--------------------+
-                |   symbol table     |  12 bytes a symbol, growing down
+                |   symbol table     |  12 bytes per symbol, growing down
                 +--------------------+
                 |   code image       |  growing up
    Ememl  --->  +--------------------+  the ceiling, lowered to here
                 |   string space     |  grows down from the ceiling as usual
 ```
 
-`FRE(0)` drops by the whole reservation, and `SYM("NAME")` is how you find anything inside it. All the `ASM` blocks in a program are assembled in line order into **one** image with **one** symbol table, so a label defined in the first block is visible in the last.
+`FRE(0)` drops by the whole amount of the reserved areas.  `SYM("NAME")` lets you perform look ups, based on LABEL/SYMBOL names to find addresses within in.  All the `ASM` blocks in a program are assembled in line order into **one** image with **one** symbol table, so a LABEL or SYMBOL defined in the first block is visible in the last (and, of course, all others).
 
-Names are significant to eight characters. Twelve bytes an entry means 64 symbols costs 768 bytes.
+Names are significant to **eight** characters. Twelve bytes per entry means 64 symbols costs 768 bytes.
 
 ### Assembling, and When Variables Get Cleared
 
@@ -302,31 +300,25 @@ ASSEMBLE 1
 CODE AT $3F9E, 6
 ```
 
-If you never run it, reaching an `ASM` block does the same thing on the spot, and from then on the block is simply stepped over.
+If you never run it, reaching an `ASM` block does an implicit `ASSEMBLE` and from then on the block is simply stepped over.
 
-**Lazy assembly clears variables if any string space is in use**, and says so:
+**Lazy assembly clears variables if any string space is in use**; it will report this as:
 
 ```
 *** ASSEMBLED, VARIABLES CLEARED
 ```
 
-Taking memory off the top means moving the floor of string space, and strings already allocated cannot be picked up and put down somewhere else — so they have to go. Numeric variables, arrays and the running program are untouched, and if no string has been built yet nothing is cleared at all and no notice appears. Note that `A$="HELLO"` does **not** allocate: EhBASIC points the descriptor straight at the program text. It is computed strings that cost space.
+Taking memory off the top means moving the floor of string space, and strings already allocated cannot be picked up and put down somewhere else; this leaves the only options as clearing/resetting them. Numeric variables, arrays and the running program are untouched, and if no string has been built yet nothing is cleared at all and no notice appears. Note that `A$="HELLO"` does **not** allocate: EhBASIC points the descriptor straight at the program text. It is **computed** strings that cost space.
 
-Run `ASSEMBLE` from the immediate prompt, or make it the first line of the program, and the question never arises.
+To avoid issues here, you can either run `ASSEMBLE` from the immediate prompt, or make it the **first line of the program**.
 
-The image goes stale on any program line being entered or deleted, on `NEW`, and on `CLEAR`. A plain `RUN` does not invalidate it, so `ASSEMBLE` once and then `RUN` as often as you like.
-
-### How the Source Survives Tokenizing
-
-Worth knowing, because it looks impossible at first. `BEQ DONE` is stored as `BEQ` followed by the **`DO` token** and `NE` — the tokenizer matches keywords at every character position, so `DONE`, `TOTAL`, `ROR`, `AND`, `INC` and plenty of others get chewed on the way in.
-
-That turns out not to matter. The crunch has to be lossless, because `LIST` must be able to put a line back exactly as it was typed, so the assembler simply expands each line through `LAB_KEYT` — the same table `LIST` uses — before parsing it. The tokenizer is not modified at all, which means it does not matter what order you type or edit the lines in, `LIST` is correct for free, and lower case works because the tokenizer never matched it in the first place.
+The image goes stale on any program line being entered or deleted, on `NEW`, and on `CLEAR`. A plain `RUN` does not invalidate it, so `ASSEMBLE` once and then `RUN` as often as you like.  Note that if you're mutating data defined in an ASM/ENDASM block, re-running a program without changes will see the MUTATED values rather than the defined ones; it takes a manual ASSEMBLE (or a code change) to force the relevant bytes to be reemitted to memory.
 
 </details>
 
 ### Errors
 
-Assembly stops at the first fault and names the BASIC line, using EhBASIC's own error machinery — the assembler walks the program itself rather than executing it, so it sets the current line from the header before raising:
+Assembly stops at the first fault and names the BASIC line, using EhBASIC's own error handling; the assembler walks the program itself rather than executing it, so it sets the current line from the header before raising the error:
 
 ```
 Ready
@@ -360,7 +352,7 @@ FE02  80 0B      BRA $FE0F
 FE04  C9 08      CMP #$08
 ```
 
-Combined with `SYM` it is the quick way to check what a block actually produced: `DASM SYM("START"),8`.
+Combined with `SYM` it is a quick and simple way to check what an ASM/ENDASM block actually produced: `DASM SYM("START"),8`.
 
 ## RENUMBER
 
@@ -439,7 +431,7 @@ RENUMBER Details
 - a program long enough that the numbering would run past **63999**, which is the highest line number EhBASIC will parse
 - `RENUMBER` reached from inside a running program. Renumbering while running would move the code out from under the execute pointer and the `GOSUB` and `FOR` structures on the stack, so it is a direct mode command only
 
-Every one of those is caught before anything has been touched, so a refused `RENUMBER` leaves the program exactly as it was. So does `Out of memory`.
+These conditions are caught before anything his changed, so a refused `RENUMBER` leaves the program exactly as it was.  Similarly, if there is insufficient memory to complete a renumber, you simply get an `Out of memory` error, and no code is changed.
 
 ### Undefined References
 
