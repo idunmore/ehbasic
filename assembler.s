@@ -27,12 +27,12 @@
 ; The crunch is lossless, because LIST has to reproduce lines exactly, so the
 ; assembler simply expands each line back into plain ASCII before parsing it
 ; (see asm_expand below). basic.s's tokenizer is left alone, entry order and
-; editing are immaterial, and LIST is correct for free.
+; editing are immaterial, and LIST remains correct.
 
-; ASM_BUILT and ASM_CPU_SEL are worked out in min_mon.s, which settles them
+; ASM_BUILT and ASM_CPU_SEL are worked out in min_mon.s, which resolves them
 ; before its include of basic.s. This is a separate assembly unit, so it has to
-; work them out for itself, and the two must agree - which they do, because the
-; Makefile passes the same -D to both
+; resolve them itself, and the two MUST agree - so the Makefile passes the same
+; -D (flags) to both
 
 .ifdef ASM_ENABLE
 ASM_BUILT = ASM_ENABLE
@@ -40,7 +40,7 @@ ASM_BUILT = ASM_ENABLE
 ASM_BUILT = 1
 .endif
 
-; which instruction set the opcode tables in opcodes.s cover.
+; Which instruction set the opcode tables in opcodes.s cover.
 ; 0 = NMOS 6502, 1 = 65C02 core, 2 = full WDC W65C02S
 
 .ifdef ASM_CPU
@@ -79,7 +79,7 @@ ASM_CPU_SEL = 2
       .importzp LAB_IGBY, LAB_GBYT, Dtypef, ut1_pl, ASM_FLG, Clinel
       .importzp Smeml, Svarl, Earryl, Sstorl, Ememl, Bpntrl, Itempl
 
-; only the low bytes are imported, the high bytes follow them in page zero
+; Only the low bytes are imported, the high bytes follow them in page zero
 
 Smemh        = Smeml+1
 Svarh        = Svarl+1
@@ -90,7 +90,7 @@ Bpntrh       = Bpntrl+1
 Itemph       = Itempl+1
 Clineh       = Clinel+1
 
-; error codes, matching the LAB_BAER table in basic.s
+; Error codes, matching the LAB_BAER table in basic.s
 
 ; An optional prefix, allowed as the first non space character of a line
 ; inside a block, whose only job is to stop EhBASIC eating the indentation
@@ -103,8 +103,8 @@ Clineh       = Clinel+1
 
 ASM_INDENT   = '|'
 
-; these follow RENUMBER's $24 in LAB_BAER, which is unconditional and so has
-; to come first. they moved up by two when it went in
+; These follow RENUMBER's $24 in LAB_BAER, which is unconditional and so has
+; to come first. Values moved up by two when RENUMBER was implemented
 
 ERRNUM_ASM   = $26            ; "Assembly syntax"
 ERRNUM_UL    = $28            ; "Undefined label"
@@ -112,19 +112,17 @@ ERRNUM_DL    = $2A            ; "Duplicate label"
 ERRNUM_BR    = $2C            ; "Branch out of range"
 ERRNUM_BLK   = $2E            ; "ASM block"
 
-; ---------------------------------------------------------------------------
-; zero page
+; Zero Page
 ;
-; taken from EhBASIC's unused $13-$5A, below the $24-$2B that wozmon.s holds.
-; nothing here has to survive a warm start, it is all working storage for the
-; two passes, but ASM_TOP and ASM_BASE do have to survive from one assembly to
-; the next so that SYM() still works and so that a re-assemble does not reserve
-; memory a second time
-; ---------------------------------------------------------------------------
+; Taken from EhBASIC's unused $13-$5A, below the $24-$2B that wozmon.s holds.
+; Nothing here has to survive a warm start, it is all working storage for the
+; two assembly passes, but ASM_TOP and ASM_BASE do have to survive from one
+; assembly to the next so that a) SYM() still works and b) that a re-assemble
+; does not reserve memory a second time
 
 ; $2C is ASM_FLG, declared in min_mon.s because basic.s clears it
 
-; kept between statements, so that SYM() still works and so that a second
+; Kept between statements, so that SYM() still works and so that a second
 ; assembly does not reserve memory all over again
 
 ASM_BAS      = $2D            ; image base, low/high
@@ -133,7 +131,7 @@ ASM_SYM      = $31            ; symbol table base, low/high
 ASM_NSY      = $33            ; symbols defined
 ASM_OEM      = $34            ; Ememl as it was before any reservation
 
-; live only while an assembly or a disassembly is running
+; Live only while an assembly or a disassembly is running
 
 ASM_LC       = $36            ; location counter, low/high
 ASM_PAS      = $38            ; pass number, 1 or 2
@@ -196,9 +194,9 @@ asm_in_prog
       STA   ASM_LST
       JSR   ASM_DRIVER        ; go build one
 
-; the block still has to be stepped over. walk the line chain from the line
+; The block still has to be stepped over. Walk the line chain from the line
 ; being executed until a line whose first token is ENDASM, then leave the
-; execute pointer on that line's terminating null. the interpreter's inner
+; execute pointer on that line's terminating null. The interpreter's inner
 ; loop reads the null, moves to the following line and picks up its number by
 ; itself, so Clinel and Clineh need no help from here
 
@@ -361,7 +359,7 @@ asm_walk_ok
 ; ---------------------------------------------------------------------------
 
 ; ---------------------------------------------------------------------------
-; walking the program
+; Walking the program
 ;
 ; A BASIC line is [link lo][link hi][number lo][number hi][tokens..][$00], so
 ; the first token sits at offset 4 and the link word is both "where the next
@@ -405,7 +403,7 @@ asm_this_step
 asm_this_out
       RTS
 
-; carry set if ASM_LPT is past the last line. the end of the program is a link
+; Carry set if ASM_LPT is past the last line. the end of the program is a link
 ; word whose high byte is zero
 
 ASM_ATEND
@@ -420,7 +418,7 @@ asm_atend_yes
       SEC
       RTS
 
-; step ASM_LPT to the next line, carry set if there is one
+; Step ASM_LPT to the next line, carry set if there is one
 
 ASM_NEXTLINE
       JSR   ASM_ATEND
@@ -487,8 +485,8 @@ asm_setup_have
 asm_setup_top
       STZ   ASM_FLG           ; the old image is gone as of now
 
-; string space has to be empty before the ceiling can move, because strings
-; already allocated cannot be picked up and put down somewhere else. after a
+; String space has to be empty before the ceiling can move, because strings
+; already allocated cannot be picked up and put down somewhere else. After a
 ; CLEAR, Sstorl is Ememl and nothing is allocated
 
       LDA   Sstorl
@@ -524,7 +522,7 @@ asm_setup_free
 ; ---------------------------------------------------------------------------
 ; ASM_EXPAND   expand the line at ASM_LPT into the work buffer as plain text
 ;
-; This is the whole reason no change to the tokenizer was needed. Assembly
+; This is the whole reason no change to the tokenizer is needed. Assembly
 ; lines are crunched exactly like BASIC ones - BEQ DONE is stored as BEQ, the
 ; DO token, NE - and the crunch is lossless because LIST has to be able to put
 ; the line back. So the same table LIST uses, LAB_KEYT, puts it back here too.
@@ -579,7 +577,7 @@ asm_exp_end
       JSR   asm_exp_store
       RTS
 
-; a token. this is LAB_152E's index arithmetic, writing to the buffer instead
+; A token. this is LAB_152E's index arithmetic, writing to the buffer instead
 ; of to the screen: LAB_KEYT + (token-$80)*4, then a length, the first
 ; character, and a pointer to the rest of the word
 
@@ -633,7 +631,7 @@ asm_exp_t4
       JSR   asm_exp_store
       JMP   asm_exp_lp
 
-; put A in the work buffer, unless it is already full
+; Put A in the work buffer, unless it is already full
 
 asm_exp_store
       PHY                     ; Y is the caller's place in the keyword table,
@@ -679,10 +677,10 @@ asm_msg_clr
       .byte $0D,$0A,"*** ASSEMBLED, VARIABLES CLEARED",$0D,$0A,$00
 
 ; ---------------------------------------------------------------------------
-; location counter, allocation and relocation
+; Location counter, allocation and relocation
 ; ---------------------------------------------------------------------------
 
-; start of a pass. in relocatable mode the counter is an offset from the image
+; Start of a pass. In relocatable mode the counter is an offset from the image
 ; base, which is not known until pass 1 has finished, so pass 1 counts from
 ; zero and pass 2 counts from the base it was given
 
@@ -704,7 +702,7 @@ asm_rpc_2
       STA   ASM_LC+1
       RTS
 
-; pass 1 is done, so the image size is known. put the image immediately below
+; Pass 1 is done, so the image size is known. Put the image immediately below
 ; the symbol table and drop the ceiling to match
 
 ASM_ALLOC
@@ -750,7 +748,7 @@ asm_alloc_oom
 
 
 ; ---------------------------------------------------------------------------
-; reading the expanded line
+; Reading the expanded line
 ;
 ; The line stays in the work buffer and is walked with ASM_BUF as the index,
 ; so a field is described by where it starts and how long it is rather than by
@@ -771,7 +769,7 @@ ASM_NEXT
       INC   ASM_BUF
       RTS
 
-; skip spaces. carry set if what follows ends the line - the null, or the ";"
+; Skip spaces. Carry set if what follows ends the line - the null, or the ";"
 ; that starts a comment
 
 ASM_SKIPSP
@@ -796,7 +794,7 @@ asm_sksp_end
       SEC
       RTS
 
-; collect the identifier at ASM_BUF into ASM_FS/ASM_FL. letters, digits and
+; Collect the identifier at ASM_BUF into ASM_FS/ASM_FL. letters, digits and
 ; underscore. carry clear if there was one
 
 ASM_FIELD
@@ -823,7 +821,7 @@ asm_fld_none
       SEC
       RTS
 
-; carry set if A is a letter, a digit or "_"
+; Carry set if A is a letter, a digit or "_"
 
 ASM_ISIDENT
       CMP   #'_'
@@ -859,7 +857,7 @@ asm_ident_no
 ; where the leading "|" is optional and exists only to protect indentation,
 ; see ASM_INDENT above.
 ;
-; with no way to tell a label from a mnemonic by position, because EhBASIC
+; With no way to tell a label from a mnemonic by position, because EhBASIC
 ; throws away the spaces between a line number and the first character (see
 ; LAB_GFPN) so nothing can be keyed off indentation. The rule is therefore
 ; that the first field is a label unless it is a mnemonic or a directive.
@@ -898,7 +896,7 @@ asm_line_field
       JSR   ASM_KEYWORD       ; is that first field an opcode or a directive
       BCS   asm_line_op       ; yes, so the line carries no label
 
-; it was a label. define it here, step over an optional ":", and then look for
+; It was a label. Define it here, step over an optional ":", and then look for
 ; a mnemonic or directive after it
 
       JSR   ASM_DEFLABEL
@@ -938,7 +936,7 @@ asm_line_done
 ; ---------------------------------------------------------------------------
 ; ASM_KEYWORD   is the field in ASM_FS/ASM_FL a directive or a mnemonic
 ;
-; carry set and X = the dispatch index if so. Directives are checked first,
+; Carry set and X = the dispatch index if so. Directives are checked first,
 ; and none of them collides with a mnemonic.
 ; ---------------------------------------------------------------------------
 
@@ -951,7 +949,7 @@ ASM_DISPATCH
       .word ASM_D_ORG         ; 10
       .word ASM_OPCODE        ; 12, the field matched a mnemonic
 
-; length, letters, dispatch index. a zero length ends the table
+; Length, letters, dispatch index. a zero length ends the table
 
 ASM_DIRTAB
       .byte 4,"BYTE",0
@@ -1084,8 +1082,8 @@ asm_mn_sh
       ASL   ASM_MNE           ; left align, OPNAME is stored that way
       ROL   ASM_MNE+1
 
-; now find it. the table is short, a straight walk is cheaper than anything
-; cleverer would be
+; Now find it. The table is short, a straight walk is likely cheaper than
+; anything cleverer would be
 
       LDX   #$01              ; MN_ILL at 0 is not a real mnemonic
 asm_mn_find
@@ -1129,7 +1127,7 @@ asm_mn_no
       RTS
 
 ; ---------------------------------------------------------------------------
-; symbol table
+; Symbol Table
 ;
 ; Twelve bytes an entry, so a walk is a straight add with no multiply:
 ;
@@ -1210,7 +1208,7 @@ asm_defs_room
 asm_defs_out
       RTS
 
-; copy the field into the entry at ASM_SPT, padded with spaces and truncated
+; Copy the field into the entry at ASM_SPT, padded with spaces and truncated
 ; to eight characters
 
 ASM_PUTNAME
@@ -1247,7 +1245,7 @@ asm_pn_done
 
 ; ASM_LOOKUP   find the field in ASM_FS/ASM_FL
 ;
-; carry set and ASM_SPT pointing at the entry if it is there
+; Carry set and ASM_SPT pointing at the entry if it is there
 
 ASM_LOOKUP
       LDA   ASM_WRK           ; walk down from the top of the table
@@ -1374,11 +1372,11 @@ asm_rl_out
       RTS
 
 ; ---------------------------------------------------------------------------
-; operand values
+; Operand Values
 ;
 ; Literals, labels, "*" for the current location, an optional "<" or ">" byte
 ; selector and one optional "+n" or "-n". Left to right, no precedence - this
-; is not the BASIC evaluator and does not pretend to be.
+; is not the BASIC expression evaluator and does not pretend to be.
 ;
 ; ASM_T3 comes back non zero if the value was written in a form that is only
 ; ever eight bits wide, which is what decides zero page against absolute.
@@ -1421,7 +1419,7 @@ asm_ex_term
 
       BRA   asm_ex_sel
 
-; the offset's own width must not count towards the operand's, or LABEL+2
+; The offset's own width must not count towards the operand's, or LABEL+2
 ; would narrow to zero page on the strength of the 2. so ASM_T3 is put back
 ; the way it was after the second term is read
 
@@ -1449,7 +1447,7 @@ asm_ex_minus
       STA   ASM_VAL+1
       BRA   asm_ex_sel
 
-; stack the value and the width, read the next term, restore the width and
+; Stack the value and the width, read the next term, restore the width and
 ; leave the old value on the stack for the caller to add or subtract
 
 asm_ex_save
@@ -1538,7 +1536,7 @@ asm_tm_4
 
       JMP   ASM_DEC
 
-; a syntax error is too far from the value parsers below to branch to, so they
+; A syntax error is too far from the value parsers below to branch to, so they
 ; go through here
 
 asm_v_syn
@@ -1551,7 +1549,7 @@ asm_tm_label
       JSR   ASM_LOOKUP
       BCS   asm_tm_got
 
-; not defined yet. that is normal in pass 1, where a forward reference has
+; Not defined yet. This is normal in pass 1, where a forward reference has
 ; simply not been reached, and an error in pass 2
 
       LDA   ASM_PAS
@@ -1585,7 +1583,7 @@ ASM_HERE
       STA   ASM_VAL+1
       RTS
 
-; a character literal, 'x'. the closing quote is optional
+; A character literal, 'x'. the closing quote is optional
 
 ASM_CHR
       INC   ASM_BUF
@@ -1708,12 +1706,12 @@ asm_bn_end
 asm_bn_out
       RTS
 
-; another reach to the syntax error, this end of the value parsers
+; Another reach to the syntax error, this end of the value parsers
 
 asm_v_syn2
       JMP   asm_ex_syn
 
-; plain decimal. under 256 is an eight bit value
+; Plain decimal. under 256 is an eight bit value
 
 ASM_DEC
       STZ   ASM_VAL
@@ -1773,10 +1771,10 @@ ASM_TIMES10
       RTS
 
 ; ---------------------------------------------------------------------------
-; emitting
+; Emitting
 ; ---------------------------------------------------------------------------
 
-; put A at the location counter, in pass 2 only, and step the counter on
+; Put A at the location counter, in pass 2 only, and step the counter on
 
 ASM_PUT
       PHA
@@ -1800,8 +1798,8 @@ asm_put_out
 ; ---------------------------------------------------------------------------
 ; ASM_OPCODE   assemble an instruction
 ;
-; The syntactic shape of the operand picks the mode; where two modes share a
-; shape the first is tried and the second used if the opcode search comes back
+; The syntactic form of the operand picks the mode; where two modes share a
+; form the first is tried and the second used if the opcode search comes back
 ; empty. That keeps every mnemonic special case out of the parser - only
 ; BBR/BBS, which are the only instructions with two operands, need naming.
 ; ---------------------------------------------------------------------------
@@ -1831,8 +1829,8 @@ ASM_OPCODE
 asm_op_addr_j
       JMP   asm_op_addr
 
-; no operand at all. accumulator first, then implied - the six instructions
-; with an accumulator form have no implied form and the other way round
+; No operand at all. Accumulator first, then implied - the six instructions
+; with an accumulator form have no implied form and vice versa
 
 asm_op_none
       LDA   ASM_MNI
@@ -1866,7 +1864,7 @@ asm_op_imm
 
       JMP   ASM_EMIT1
 
-; something in brackets
+; Something in brackets
 
 asm_op_ind
       INC   ASM_BUF
@@ -1942,7 +1940,7 @@ asm_op_bad
       LDX   #ERRNUM_ASM
       JMP   ASM_ERROR
 
-; a bare address. branches take one, the bit test instructions take two, and
+; A bare address. Branches take one, the bit test instructions take two, and
 ; everything else narrows between zero page and absolute on how the operand
 ; was written rather than on what it turns out to be worth - see ASM_EXPR
 
@@ -2040,7 +2038,7 @@ asm_op_e2
 
 ; ASM_TRY   is there an opcode for ASM_MNI in mode A
 ;
-; carry set and the opcode in ASM_OPC if so. The bit numbered instructions
+; Carry set and the opcode in ASM_OPC if so. The bit numbered instructions
 ; carry their bit in the opcode, so it is folded in here.
 
 ASM_TRY
@@ -2069,7 +2067,7 @@ asm_try_no
       RTS
 
 ; ---------------------------------------------------------------------------
-; emitting instructions
+; Emitting instructions
 ; ---------------------------------------------------------------------------
 
 ASM_EMIT0
@@ -2097,7 +2095,7 @@ ASM_EMIT2
       LDA   ASM_VAL+1
       JMP   ASM_PUT
 
-; a branch. the displacement is measured from the byte after the instruction,
+; A branch. The displacement is measured from the byte after the instruction,
 ; and only pass 2 can check it - pass 1 does not know where anything is yet
 
 ASM_EMITREL
@@ -2178,7 +2176,7 @@ asm_disp_far
       JMP   ASM_ERROR
 
 ; ---------------------------------------------------------------------------
-; directives
+; Directives
 ; ---------------------------------------------------------------------------
 
 ; BYTE n[,n..]
@@ -2245,7 +2243,7 @@ asm_dt_bad
       LDX   #ERRNUM_ASM
       JMP   ASM_ERROR
 
-; name EQU value. the label has already been defined at the location counter
+; Name EQU value. The label has already been defined at the location counter
 ; by the time we get here, which is not what EQU means, so the value is
 ; overwritten rather than a second symbol being made
 
@@ -2406,7 +2404,7 @@ asm_ll_nl
 asm_ll_out
       RTS
 
-; carry set if ASM_LC0+Y is still inside what this line emitted
+; Carry set if ASM_LC0+Y is still inside what this line emitted
 
 asm_ll_more
       TYA
@@ -2430,7 +2428,7 @@ asm_ll_yes
       SEC
       RTS
 
-; print A as two hex digits, and a space
+; Print A as two hex digits, and a space
 
 ASM_HEX2
       PHA
@@ -2455,7 +2453,7 @@ ASM_SP
       JMP   LAB_PRNA
 
 ; ---------------------------------------------------------------------------
-; report where the image landed, after an ASSEMBLE that was asked to list
+; Report where the image landed, after an ASSEMBLE that was asked to list
 ; ---------------------------------------------------------------------------
 
 ASM_REPORT
@@ -2543,8 +2541,8 @@ asm_sym_no
       JMP   LAB_XERR          ; not the assembler's ASM_ERROR - there is no
                               ; line being assembled to name
 
-; the opcode tables and the disassembler are included rather than linked as
-; separate units, the same way min_mon.s includes basic.s. they reach straight
+; The opcode tables and the disassembler are included rather than linked as
+; separate units, the same way min_mon.s includes basic.s. They reach straight
 ; into the zero page declared above, which would otherwise all have to be
 ; exported and imported back again
 
