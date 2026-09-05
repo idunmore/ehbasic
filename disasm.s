@@ -1,4 +1,4 @@
-; Included by assembler.s, which has already settled the build flags,
+; Included by assembler.s, which has already computed the build flags,
 ; imported the EhBASIC internals and selected the CODE segment.
 ;
 ;   DASM start[,count]    disassemble count instructions from start,
@@ -12,7 +12,7 @@
 DASM_DEFAULT = 20             ; instructions per DASM when no count is given
 
 ; ---------------------------------------------------------------------------
-; operand formatting, one six byte row per addressing mode
+; Operand formatting, one six byte row per addressing mode
 ;
 ;   kind   what to print between the prefix and the suffix
 ;   pre    up to two literal characters before it

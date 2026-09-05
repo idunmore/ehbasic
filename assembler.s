@@ -1279,7 +1279,7 @@ asm_lk_yes
       SEC
       RTS
 
-; compare the field with the name at ASM_SPT, carry set if they match
+; Compare the field with the name at ASM_SPT, carry set if they match
 
 ASM_CMPNAME
       LDY   #$00

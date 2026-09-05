@@ -5,12 +5,16 @@
 ;   0   NMOS 6502, the original 151 opcodes
 ;   1   65C02 core - adds BRA, PHX/PHY/PLX/PLY, STZ, TRB/TSB, INC A/DEC A,
 ;       BIT #imm, BIT zp,X, BIT abs,X, JMP (abs,X) and the (zp) modes. 178
-;   2   full WDC W65C02S - adds RMB0-7, SMB0-7, BBR0-7, BBS0-7, WAI, STP. 212
+;   2   Full WDC W65C02S - adds RMB0-7, SMB0-7, BBR0-7, BBS0-7, WAI, STP. 212
 ;
-; 2 is the default, because that is the part the board carries. A Rockwell
-; R65C02 has the bit instructions but not WAI or STP, and a GTE/CMD G65SC02
-; has neither, so build those with "make ASMCPU=1". Nothing here can tell what
-; the silicon actually is - the flag is the only guard.
+;       WDC W65C02S, is the default; per the stock BE6502 build, for which this
+;       version of EhBASIC is specifically targeted for.  
+;
+; The Rockwell R65C02 has the bit instructions but not WAI or STP, and the
+; GTE/CMD G65SC02 has neither, so build those with "make ASMCPU=1".
+;
+; There is no way to determine the appropriate setting automatically, as we are
+; not building ON the target silicon.
 ;
 ; THIS FILE IS DERIVED, NOT TYPED. The 256 entries below were generated from a
 ; cross check of two independent opcode tables rather than transcribed by hand,
@@ -18,16 +22,16 @@
 ; The rows are laid out sixteen to a line group so they can still be diffed by
 ; eye against a printed opcode matrix.
 
-; Included by assembler.s, which has already settled ASM_BUILT and
-; ASM_CPU_SEL and selected the CODE segment.
+; Included by assembler.s, which has already determined the state of ASM_BUILT
+; and ASM_CPU_SEL and selected the CODE segment.
 
 ; ---------------------------------------------------------------------------
-; addressing modes
+; Addressing Modes
 ;
-; the instruction length lives in the high nibble of the mode constant. that
-; costs nothing to store and saves a second table, and a lookup in it, in both
-; the assembler and the disassembler - the mode byte answers "how do I parse
-; this" and "how many bytes is it" at the same time
+; The instruction length lives in the high nibble of the addressing mode
+; constant. This costs nothing to store and saves a second table, and a lookup
+; in it, in both the Assembler and the Aisassembler - the mode byte answers
+; both "how do I parse this" and "how many bytes is it" at the same time.
 ; ---------------------------------------------------------------------------
 
 MD_IMP       = $10            ; 1 byte , implied
@@ -51,7 +55,7 @@ MD_MODE      = $0F            ; mask for the mode number
 MD_LEN       = $F0            ; mask for the length
 
 ; ---------------------------------------------------------------------------
-; mnemonic indices
+; Mnemonic Indices
 ;
 ; MN_ILL stays at 0 so that an unimplemented opcode can never match a real
 ; mnemonic, and the four bit numbered WDC instructions are next so that "does
@@ -134,9 +138,14 @@ MN_WAI        =  70
 MN_COUNT     = 71
 
 ; ---------------------------------------------------------------------------
-; mnemonic names, three letters packed 5 bits each and left aligned, so the
-; letters occupy bits 15-11, 10-6 and 5-1. left aligned because the unpacker
-; shifts the top bit out sixteen times rather than masking from the bottom.
+; Mnemonic Names
+;
+; Mnemonic names are three letters packed 5 bits each and left aligned, so the
+; letters occupy bits 15-11, 10-6 and 5-1. They are left aligned because the
+; unpacker shifts the top bit out sixteen times rather than masking from the
+; bottom.  This uses 2 bytes per mnemonic instead of the 3 or 4 that would
+; be required for a straight text-character mapping.
+;
 ; letter = value + '@', so 1 = "A" .. 26 = "Z"
 ; ---------------------------------------------------------------------------
 
@@ -214,15 +223,15 @@ OPNAME
       .word $B852            ; WAI
 
 ; ---------------------------------------------------------------------------
-; the opcode map
+; Opcode Map
 ;
-; one declarative list, expanded twice, so the mnemonic and mode tables can
-; never drift apart. lvl is the lowest ASM_CPU that has the instruction, and
-; anything above the selected level is blanked to MN_ILL so that it fails
+; One declarative list, expanded twice, so the mnemonic and mode tables can
+; never drift apart. "lvl" is the lowest ASM_CPU that has the instruction,
+; and anything above the selected level is blanked to MN_ILL so that it fails
 ; cleanly rather than assembling something the CPU cannot run
 ; ---------------------------------------------------------------------------
 
-; which of the two tables is being emitted is held in a redefinable symbol
+; Which of the two tables is being emitted is held in a redefinable symbol
 ; rather than passed down as a macro argument, because ca65 will not resolve a
 ; macro parameter through a nested macro call
 
