@@ -51,8 +51,7 @@ This update also includes a fix for an interrupt safety issue (see the commit de
 
 Stock EhBASIC looks for `[CTRL-C]` by reading the input device itself, from `CTRLC`.  This runs after every direct command and between the statements of a running program. Whatever byte it finds is put in `ccbyte` under a countdown that only `GET` ever reads, so anything that is not a `[CTRL-C]` is swallowed.
 
-With the buffered input implementation, per my first modification here, this would reliably eat a character whenever anything is typed or pasted ahead of the prompt: `NEW` followed immediately by `10 PRINT "A"`
-would store line **0**.
+With the buffered input implementation, per my first modification here, this would reliably eat a character whenever anything is typed or pasted ahead of the prompt: `NEW` followed immediately by `10 PRINT "A"` would store line **0**.
 
 To address this, `[CTRL-C]` is now trapped by the serial interrupt handler and recorded in a flag, and `VEC_CC` points at a check that reads _that_ flag instead of the input stream (`CCHECK` in `min_mon.s`). Nothing is taken out of the input, and `[CTRL-C]` still breaks a running program even with type-ahead queued up behind it. A `[CTRL-C]` typed at the `Ready` prompt is discarded once the line it was typed into is complete, so it does not stop whatever is entered next.
 
@@ -457,7 +456,7 @@ The free RAM it wants is what that widening costs: at most four bytes per refere
 
 ### Speed
 
-`RENUMBER` looks every reference up by walking the line headers, so the work grows with the program times the number of references in it. A 500 line program with a few hundred references takes about three seconds on a 1 MHz board, and well under one on a clocked up one.
+`RENUMBER` looks every reference up by walking the line headers, so the work grows with the program times the number of references in it. A 500 line program with a few hundred references takes about three seconds on a 1 MHz board, and well under one second when running a faster clock.
 
 There is no progress output, and `[CTRL-C]` will not stop it. That is deliberate: there is no point part way through where the program would still be coherent. A `[CTRL-C]` typed while it runs is discarded at the prompt afterwards, the same as one typed at the prompt itself.
 
@@ -536,7 +535,7 @@ WozMon lives at `$FE00` rather than its native `$FF00` because the vectors at `$
 
 A command that is **not** behind a build flag wants its token in the unconditional run, above the `.if ASM_BUILT` and `.if LCD_BUILT` groups, the way `RENUMBER` has it. Put it after them and its token value, and so its `LAB_CTBL` and `LAB_KEYT` ordinals, move about depending on what else got built. The same goes for a new error code in `LAB_BAER`. And anything in `custom_commands.s` that is always built needs whatever it borrows from EhBASIC exported unconditionally from `min_mon.s` — a symbol can only be exported once, so it has to come out of the `HELP_BUILT` and `ASM_BUILT` blocks when it goes into the unconditional one.
 
-Two things to know before you add one. `LAB_KEYT` is a **dense** array indexed `(token-$80)*4`, so a new entry has to go in at exactly the right ordinal or `LIST` prints garbage from that token on. And within a letter's dictionary table a longer keyword sharing a prefix must come **first** — `ENDASM` sits above `END` for the same reason `DOKE` sits above `DO`, or it would crunch as `END` followed by `ASM`.
+**Note** the following **before** adding your own commands: `LAB_KEYT` is a **dense** array indexed as `(token-$80)*4`, so a new entry has to go in at exactly the right ordinal or `LIST` prints garbage from that token on. And within a letter's dictionary table a longer keyword sharing a prefix must come **first** — `ENDASM` sits above `END` for the same reason `DOKE` sits above `DO`, or it would crunch as `END` followed by `ASM`.
 
 There are **six** token values left. The tokens run `$80` to `$F9`; a function keyword also needs `LAB_FTPL` and `LAB_FTBL` entries, and only tokens below `TK_TAB` can start a statement.
 
